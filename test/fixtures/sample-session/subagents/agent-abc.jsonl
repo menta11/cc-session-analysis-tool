@@ -1,0 +1,2 @@
+{"type":"user","uuid":"u1","parentUuid":null,"timestamp":"2026-04-24T12:00:00.000Z","sessionId":"abc","message":{"role":"user","content":"do task"}}
+{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-04-24T12:00:01.000Z","sessionId":"abc","message":{"model":"x","role":"assistant","content":[{"type":"text","text":"done"}],"usage":{}}}

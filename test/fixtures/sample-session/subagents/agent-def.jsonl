@@ -1,0 +1,2 @@
+{"type":"user","uuid":"u1","parentUuid":null,"timestamp":"2026-04-24T12:00:00.000Z","sessionId":"def","message":{"role":"user","content":"another task"}}
+{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-04-24T12:00:05.000Z","sessionId":"def","message":{"model":"x","role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{}}}

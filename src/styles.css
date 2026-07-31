@@ -1,0 +1,256 @@
+/*
+ * 组件层交互态：inline style 表达不了 :hover / :active / :focus，
+ * 统一在此用 CSS 变量定义。颜色/字号/间距仍走 index.html 的 token。
+ */
+
+/* ---------- 交互行（会话列表 / 时间树） ---------- */
+.row {
+  cursor: pointer;
+  background: transparent;
+  transition: background var(--transition-fast);
+}
+.row:hover {
+  background: var(--bg-hover);
+}
+.row-selected,
+.row-selected:hover {
+  background: var(--accent-soft);
+}
+
+/* ---------- 折叠箭头（SVG，旋转表达展开） ---------- */
+.chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  flex-shrink: 0;
+  transition: transform var(--transition-fast), color var(--transition-fast);
+}
+.chevron:hover {
+  color: var(--text-secondary);
+}
+.chevron-open {
+  transform: rotate(90deg);
+}
+.chevron-muted {
+  visibility: hidden;
+}
+
+/* ---------- 通用按钮 ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 4px 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  color: var(--text);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  font-size: var(--fs-base);
+  font-family: inherit;
+  line-height: 1.5;
+  transition: background var(--transition-fast), border-color var(--transition-fast),
+    color var(--transition-fast), opacity var(--transition-fast);
+}
+.btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+.btn:active {
+  background: var(--bg-active);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn:disabled:hover {
+  background: var(--bg-elevated);
+  border-color: var(--border-strong);
+}
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.btn-primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+.btn-primary:disabled:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ---------- 输入框 ---------- */
+.input {
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: var(--fs-base);
+  font-family: inherit;
+  outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.input::placeholder {
+  color: var(--text-faint);
+}
+.input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+/* ---------- 分隔条（SplitPane） ---------- */
+.splitter {
+  background: var(--border);
+  cursor: row-resize;
+  flex-shrink: 0;
+  transition: background var(--transition-fast);
+}
+.splitter:hover,
+.splitter.is-dragging {
+  background: var(--accent);
+}
+
+/* ---------- 时间树行内细节 ---------- */
+.tt-row {
+  cursor: pointer;
+  background: transparent;
+  transition: background var(--transition-fast);
+}
+.tt-row:hover {
+  background: var(--bg-hover);
+}
+.tt-row-selected,
+.tt-row-selected:hover {
+  background: var(--accent-soft);
+}
+.tt-row-stripe {
+  background: var(--bg-subtle);
+}
+.tt-row-stripe:hover {
+  background: var(--bg-hover);
+}
+
+/* ---------- 类别图例 ---------- */
+.legend {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg);
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+}
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.legend-sw {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+/* ---------- 甘特列纵向拖柄（表头内，调甘特宽） ---------- */
+.col-splitter {
+  width: 8px;
+  flex: 0 0 8px;
+  cursor: col-resize;
+  align-self: stretch;
+  position: relative;
+  background: transparent;
+  flex-shrink: 0;
+}
+.col-splitter::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--border);
+  transition: background var(--transition-fast), width var(--transition-fast);
+}
+.col-splitter:hover::after,
+.col-splitter.is-dragging::after {
+  background: var(--accent);
+  width: 2px;
+}
+
+/* ---------- DetailPanel 卡片化 ---------- */
+.kvgrid {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 3px 8px;
+  margin-bottom: var(--sp-2);
+}
+.kvgrid .k {
+  color: var(--text-faint);
+}
+.kvgrid .v {
+  color: var(--text);
+  word-break: break-word;
+}
+.vchips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: var(--sp-2);
+}
+.vchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--bg-active);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  font-family: var(--font-sans);
+}
+.vchip b {
+  color: var(--text);
+  font-weight: 600;
+}
+.vchip.ok {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.bucket-card {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--cat-direct);
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-2);
+  background: var(--bg);
+}
+.bucket-card .name {
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+}
+.errbadge {
+  color: var(--danger);
+  background: var(--danger-soft);
+  font-size: var(--fs-xs);
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  font-weight: 600;
+}
+.bucket-card pre {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  max-height: 80px;
+  overflow: auto;
+  font-size: var(--fs-sm);
+}

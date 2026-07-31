@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>深打磨原型 · CC 会话耗时分析</title>
+    <style>
+      /* ============ token（复用 index.html 体系） ============ */
+      :root {
+        color-scheme: light;
+        --bg:#ffffff; --bg-subtle:#f7f8fa; --bg-elevated:#ffffff; --bg-hover:#f1f3f5; --bg-active:#e9ecef;
+        --text:#1f2937; --text-secondary:#4b5563; --text-tertiary:#6b7280; --text-faint:#9ca3af;
+        --border:#e5e7eb; --border-subtle:#f0f0f0; --border-strong:#d1d5db;
+        --accent:#2563eb; --accent-hover:#1d4ed8; --accent-soft:rgba(37,99,235,.12); --accent-soft-hover:rgba(37,99,235,.18); --ring:rgba(37,99,235,.45); --on-accent:#fff;
+        --danger:#b91c1c; --danger-soft:rgba(185,28,28,.10);
+        --cat-wait:#6b7280; --cat-direct:#0072b2; --cat-delegated:#d55e00; --cat-compute:#009e73;
+        --font-sans: system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+        --font-mono: ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+        --fs-xs:11px; --fs-sm:12px; --fs-base:13px; --fs-md:14px; --fs-lg:16px; --fs-xl:18px;
+        --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px;
+        --r-sm:4px; --r-md:6px; --r-lg:8px; --r-xl:12px;
+        --shadow-sm:0 1px 2px rgba(0,0,0,.05); --shadow-md:0 4px 12px rgba(0,0,0,.08);
+        --tf:120ms ease-out; --t:180ms ease-out;
+      }
+      [data-theme="dark"] {
+        color-scheme:dark;
+        --bg:#0e1116; --bg-subtle:#161b22; --bg-elevated:#1c232c; --bg-hover:#1f2730; --bg-active:#28323d;
+        --text:#e6edf3; --text-secondary:#b9c2cc; --text-tertiary:#8b96a3; --text-faint:#6e7681;
+        --border:#2d333b; --border-subtle:#21262d; --border-strong:#3d444d;
+        --accent:#4c9ffb; --accent-hover:#6db4fc; --accent-soft:rgba(76,159,251,.16); --accent-soft-hover:rgba(76,159,251,.24); --ring:rgba(76,159,251,.55); --on-accent:#08121f;
+        --danger:#f87171; --danger-soft:rgba(248,113,113,.14);
+        --cat-wait:#9ca3af; --cat-direct:#4c9ffb; --cat-delegated:#f59e0b; --cat-compute:#34d399;
+        --shadow-sm:0 1px 2px rgba(0,0,0,.4); --shadow-md:0 4px 12px rgba(0,0,0,.5);
+      }
+      *{box-sizing:border-box}
+      html,body{height:100%}
+      body{margin:0;font-family:var(--font-sans);font-size:var(--fs-base);line-height:1.5;color:var(--text);background:var(--bg);-webkit-font-smoothing:antialiased}
+      ::-webkit-scrollbar{width:10px;height:10px}
+      ::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:6px;border:2px solid transparent;background-clip:content-box}
+      ::-webkit-scrollbar-track{background:transparent}
+      :focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:var(--r-sm)}
+
+      /* ============ 顶部应用栏 chrome ============ */
+      .appbar{height:44px;display:flex;align-items:center;gap:var(--sp-3);padding:0 var(--sp-3);border-bottom:1px solid var(--border);background:var(--bg-subtle);flex-shrink:0}
+      .appbar .brand{display:flex;align-items:center;gap:var(--sp-2);font-weight:700;font-size:var(--fs-md);white-space:nowrap}
+      .appbar .logo{width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,var(--accent),var(--cat-compute));display:inline-flex;align-items:center;justify-content:center;color:var(--on-accent);font-size:13px;font-weight:800}
+      .metabar{display:flex;align-items:center;gap:var(--sp-1);margin-left:var(--sp-2);min-width:0}
+      .chip{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border:1px solid var(--border);border-radius:999px;background:var(--bg-elevated);color:var(--text-secondary);font-size:var(--fs-xs);white-space:nowrap}
+      .chip b{color:var(--text);font-weight:600}
+      .chip .dot{width:6px;height:6px;border-radius:50%;background:var(--cat-compute)}
+      .appbar .spacer{flex:1}
+      .iconbtn{width:30px;height:30px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--text-secondary);border-radius:var(--r-sm);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:background var(--tf),color var(--tf),border-color var(--tf)}
+      .iconbtn:hover{background:var(--bg-hover);color:var(--text);border-color:var(--accent)}
+
+      /* ============ 布局 ============ */
+      .shell{display:flex;height:calc(100vh - 44px)}
+      .sidebar{width:300px;flex-shrink:0;border-right:1px solid var(--border);background:var(--bg-subtle);display:flex;flex-direction:column;min-height:0}
+      .side-head{padding:8px 12px;font-weight:700;font-size:var(--fs-sm);color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border)}
+      .input{margin:var(--sp-2);padding:6px 10px;border:1px solid var(--border-strong);border-radius:var(--r-sm);background:var(--bg-elevated);color:var(--text);font-size:var(--fs-base);font-family:inherit;outline:none}
+      .input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--ring)}
+      .list{flex:1;overflow:auto;min-height:0}
+      .group{display:flex;align-items:center;gap:var(--sp-1);padding:7px 10px;background:var(--bg-active);font-weight:600;font-size:var(--fs-sm);color:var(--text-secondary);border-bottom:1px solid var(--border);cursor:pointer}
+      .group:hover{background:var(--bg-hover)}
+      .chev{display:inline-flex;align-items:center;justify-content:center;color:var(--text-faint);transition:transform var(--tf)}
+      .chev.open{transform:rotate(90deg)}
+      .srow{padding:6px 12px;border-bottom:1px solid var(--border-subtle);border-left:2px solid transparent;cursor:pointer;transition:background var(--tf)}
+      .srow:hover{background:var(--bg-hover)}
+      .srow.sel{background:var(--accent-soft);border-left-color:var(--accent)}
+      .srow .sid{font-family:var(--font-mono);font-weight:600;font-size:var(--fs-base);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .srow .meta{display:flex;gap:8px;color:var(--text-faint);font-size:var(--fs-xs);margin-top:1px}
+
+      /* ============ 主区 ============ */
+      .main{flex:1;min-width:0;display:flex;flex-direction:column;min-height:0}
+      .pane-top{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+      .tree-wrap{flex:1;overflow:auto;min-height:0}
+      .detail-wrap{flex-shrink:0;max-height:42%;overflow:auto;border-top:1px solid var(--border);background:var(--bg-elevated)}
+      .splitter{height:6px;background:var(--border);cursor:row-resize;flex-shrink:0}
+      .splitter:hover{background:var(--accent)}
+      .pane-bottom{flex:0 0 32%;overflow:auto;background:var(--bg-subtle);padding:var(--sp-3)}
+
+      /* ============ TimeTree 深做 ============ */
+      .tree{font-size:var(--fs-base);color:var(--text);user-select:none}
+      .legend{display:flex;align-items:center;gap:var(--sp-4);padding:6px 12px;border-bottom:1px solid var(--border-subtle);background:var(--bg);font-size:var(--fs-xs);color:var(--text-tertiary)}
+      .legend .item{display:inline-flex;align-items:center;gap:5px}
+      .legend .sw{width:10px;height:10px;border-radius:3px}
+      .thead{display:flex;align-items:center;padding:8px 10px;background:var(--bg-subtle);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:1;font-weight:700;font-size:var(--fs-sm);color:var(--text-secondary)}
+      .trow{display:flex;align-items:center;padding:0 10px;height:28px;border-left:2px solid transparent;cursor:pointer;transition:background var(--tf)}
+      .trow:hover{background:var(--bg-hover)}
+      .trow.sel{background:var(--accent-soft);border-left-color:var(--accent)}
+      .trow.stripe{background:var(--bg-subtle)}
+      .trow.stripe:hover{background:var(--bg-hover)}
+      .trow .tc{width:16px;color:var(--text-faint);display:inline-flex;justify-content:center}
+      .trow .lbl{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .trow .cnt{color:var(--text-faint);margin-left:4px}
+      .bar{width:90px;flex:0 0 90px;height:6px;background:var(--bg-active);border-radius:3px;overflow:hidden}
+      .bar > i{display:block;height:100%;border-radius:3px}
+      .dur{width:62px;flex:0 0 62px;text-align:right;font-variant-numeric:tabular-nums;color:var(--text-secondary)}
+      .pct{width:46px;flex:0 0 46px;text-align:right;font-variant-numeric:tabular-nums;color:var(--text-faint)}
+      .gantt{width:300px;flex:0 0 300px;margin-left:8px;position:relative;height:14px;border-left:1px solid var(--border);border-right:1px solid var(--border);background:repeating-linear-gradient(to right,var(--border-subtle) 0 1px,transparent 1px 25%)}
+      .gantt .seg{position:absolute;top:1px;bottom:1px;border-radius:2px}
+
+      /* ============ DetailPanel 卡片化 ============ */
+      .detail{padding:var(--sp-3);font-family:var(--font-mono);font-size:var(--fs-base);border-top:3px solid var(--cat-direct)}
+      .detail h4{margin:0 0 var(--sp-2);font-weight:700;font-family:var(--font-sans);display:flex;align-items:baseline;gap:6px}
+      .detail h4 .sub{color:var(--text-faint);font-weight:400;font-size:var(--fs-sm)}
+      .kvgrid{display:grid;grid-template-columns:130px 1fr;gap:3px 8px;margin-bottom:var(--sp-3)}
+      .kvgrid .k{color:var(--text-faint)}
+      .kvgrid .v{color:var(--text);word-break:break-word}
+      .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:var(--sp-3)}
+      .vchip{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;background:var(--bg-active);color:var(--text-secondary);font-size:var(--fs-xs);font-family:var(--font-sans)}
+      .vchip b{color:var(--text);font-weight:600}
+      .vchip.ok{background:var(--accent-soft);color:var(--accent)}
+      .hint{padding:var(--sp-2) var(--sp-3);background:var(--bg-subtle);border:1px solid var(--border-subtle);border-radius:var(--r-md);color:var(--text-secondary);font-size:var(--fs-sm);font-family:var(--font-sans)}
+      .btn{display:inline-flex;align-items:center;gap:4px;padding:5px 12px;border:1px solid var(--border-strong);background:var(--bg-elevated);color:var(--text);border-radius:var(--r-sm);cursor:pointer;font-size:var(--fs-base);font-family:var(--font-sans)}
+      .btn:hover{background:var(--bg-hover);border-color:var(--accent)}
+      .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+      .btn.primary:hover{background:var(--accent-hover)}
+      .bucket-card{border:1px solid var(--border);border-left:3px solid var(--cat-direct);border-radius:var(--r-md);padding:var(--sp-2) var(--sp-3);margin-bottom:var(--sp-2);background:var(--bg)}
+      .bucket-card .name{font-weight:600;display:flex;align-items:center;gap:6px;font-family:var(--font-mono)}
+      .errbadge{color:var(--danger);background:var(--danger-soft);font-size:var(--fs-xs);padding:1px 6px;border-radius:var(--r-sm);font-weight:600}
+      .bucket-card pre{margin:4px 0 0;color:var(--text-secondary);white-space:pre-wrap;font-size:var(--fs-sm);max-height:80px;overflow:auto}
+
+      /* ============ AiReport ============ */
+      .rep-toolbar{display:flex;align-items:center;gap:var(--sp-2);margin-bottom:var(--sp-2);flex-wrap:wrap}
+      .rep-hint{color:var(--text-faint);font-size:var(--fs-sm)}
+      .md{font-family:var(--font-sans);font-size:var(--fs-base);line-height:1.6;color:var(--text)}
+      .md h2{font-size:var(--fs-md);border-bottom:1px solid var(--border-subtle);padding-bottom:3px;margin:10px 0 6px}
+      .md p{margin:6px 0}
+      .md ul{margin:6px 0;padding-left:22px}
+      .md code{font-family:var(--font-mono);font-size:var(--fs-sm);background:var(--bg-active);padding:1px 4px;border-radius:var(--r-sm)}
+
+      .tag{position:fixed;right:16px;bottom:16px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--r-lg);padding:10px 14px;box-shadow:var(--shadow-md);font-size:var(--fs-sm);color:var(--text-secondary);max-width:260px}
+      .tag b{color:var(--text)}
+    </style>
+  </head>
+  <body>
+    <!-- 顶部应用栏 -->
+    <div class="appbar">
+      <span class="brand"><span class="logo">C</span> Claude 会话耗时分析</span>
+      <span class="metabar">
+        <span class="chip"><span class="dot"></span> <b>71598b9d</b></span>
+        <span class="chip">墙钟 <b>1h32m</b></span>
+        <span class="chip">项目 <b>process-docs</b></span>
+        <span class="chip">2h前</span>
+      </span>
+      <span class="spacer"></span>
+      <button class="iconbtn" id="theme" title="切换主题">☀</button>
+    </div>
+
+    <div class="shell">
+      <!-- 左：会话列表（信息增强） -->
+      <aside class="sidebar">
+        <div class="side-head">会话</div>
+        <input class="input" placeholder="搜索会话 ID…" />
+        <div class="list">
+          <div class="group"><svg class="chev open" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg> process-docs <span style="color:var(--text-faint);font-weight:400;margin-left:auto">12</span></div>
+          <div class="srow sel">
+            <div class="sid">71598b9d-593d…</div>
+            <div class="meta"><span>2h前</span><span>·</span><span>48 KB</span><span>·</span><span>1h32m</span></div>
+          </div>
+          <div class="srow">
+            <div class="sid">a84a976b-4255…</div>
+            <div class="meta"><span>昨天</span><span>·</span><span>12 KB</span><span>·</span><span>1h02m</span></div>
+          </div>
+          <div class="srow">
+            <div class="sid">afa5592e-ebf7…</div>
+            <div class="meta"><span>昨天</span><span>·</span><span>9 KB</span><span>·</span><span>45m</span></div>
+          </div>
+          <div class="group"><svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg> cc-session-tool <span style="color:var(--text-faint);font-weight:400;margin-left:auto">5</span></div>
+        </div>
+      </aside>
+
+      <!-- 右：主区 -->
+      <main class="main">
+        <div class="pane-top">
+          <div class="tree-wrap">
+            <div class="tree">
+              <!-- 图例 -->
+              <div class="legend">
+                <span class="item"><span class="sw" style="background:var(--cat-wait)"></span> 等用户</span>
+                <span class="item"><span class="sw" style="background:var(--cat-direct)"></span> 直接工具</span>
+                <span class="item"><span class="sw" style="background:var(--cat-delegated)"></span> 委派 Agent</span>
+                <span class="item"><span class="sw" style="background:var(--cat-compute)"></span> LLM 计算</span>
+              </div>
+              <!-- 表头 -->
+              <div class="thead">
+                <span style="width:16px"></span>
+                <span style="flex:1">71598b9d · process-docs</span>
+                <span style="width:90px"></span>
+                <span class="dur" style="color:var(--text)">1h32m</span>
+                <span class="pct">100%</span>
+                <div class="gantt" style="height:16px">
+                  <span style="position:absolute;font-size:10px;color:var(--text-faint);left:0">0</span>
+                  <span style="position:absolute;font-size:10px;color:var(--text-faint);left:25%;transform:translateX(-50%)">23m</span>
+                  <span style="position:absolute;font-size:10px;color:var(--text-faint);left:50%;transform:translateX(-50%)">46m</span>
+                  <span style="position:absolute;font-size:10px;color:var(--text-faint);left:75%;transform:translateX(-50%)">1h09m</span>
+                  <span style="position:absolute;font-size:10px;color:var(--text-faint);right:0;transform:translateX(100%)">1h32m</span>
+                </div>
+              </div>
+              <!-- 行 -->
+              <div class="trow"><span class="tc"><svg class="chev open" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span><span class="lbl">等用户（轮间间隙+AskUserQuestion）<span class="cnt">×3</span></span><span class="bar"><i style="width:43%;background:var(--cat-wait)"></i></span><span class="dur">40m</span><span class="pct">43%</span>
+                <div class="gantt"><div class="seg" style="left:0%;width:8%;background:var(--cat-wait)"></div><div class="seg" style="left:60%;width:18%;background:var(--cat-wait)"></div><div class="seg" style="left:82%;width:18%;background:var(--cat-wait)"></div></div>
+              </div>
+              <div class="trow stripe"><span class="tc"><svg class="chev open" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span><span class="lbl">本地工具<span class="cnt">×14</span></span><span class="bar"><i style="width:50%;background:linear-gradient(to right,var(--cat-direct) 60%,var(--cat-delegated) 60%)"></i></span><span class="dur">46m</span><span class="pct">50%</span>
+                <div class="gantt"><div class="seg" style="left:8%;width:30%;background:var(--cat-direct)"></div><div class="seg" style="left:40%;width:18%;background:var(--cat-delegated)"></div></div>
+              </div>
+              <div class="trow" style="padding-left:32px"><span class="tc"></span><span class="lbl">直接工具<span class="cnt">×6</span></span><span class="bar"><i style="width:18%;background:var(--cat-direct)"></i></span><span class="dur">16m</span><span class="pct">18%</span>
+                <div class="gantt"><div class="seg" style="left:8%;width:18%;background:var(--cat-direct)"></div></div>
+              </div>
+              <div class="trow sel" style="padding-left:32px"><span class="tc"><svg class="chev open" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span><span class="lbl">委派 Agent ★<span class="cnt">×8</span></span><span class="bar"><i style="width:32%;background:var(--cat-delegated)"></i></span><span class="dur">30m</span><span class="pct">32%</span>
+                <div class="gantt"><div class="seg" style="left:40%;width:18%;background:var(--cat-delegated)"></div></div>
+              </div>
+              <div class="trow" style="padding-left:48px"><span class="tc"></span><span class="lbl">general-purpose · do thing</span><span class="bar"><i style="width:11%;background:var(--cat-delegated)"></i></span><span class="dur">6m</span><span class="pct">11%</span>
+                <div class="gantt"><div class="seg" style="left:40%;width:6%;background:var(--cat-delegated)"></div></div>
+              </div>
+              <div class="trow stripe" style="padding-left:48px"><span class="tc"></span><span class="lbl">agent · refactor parser</span><span class="bar"><i style="width:7%;background:var(--cat-delegated)"></i></span><span class="dur">4m</span><span class="pct">7%</span>
+                <div class="gantt"><div class="seg" style="left:48%;width:4%;background:var(--cat-delegated)"></div></div>
+              </div>
+              <div class="trow"><span class="tc"><svg class="chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span><span class="lbl">LLM(think+output)</span><span class="bar"><i style="width:7%;background:var(--cat-compute)"></i></span><span class="dur">6m</span><span class="pct">7%</span>
+                <div class="gantt"><div class="seg" style="left:38%;width:2%;background:var(--cat-compute)"></div><div class="seg" style="left:58%;width:3%;background:var(--cat-compute)"></div></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- DetailPanel 卡片化 -->
+          <div class="detail-wrap">
+            <div class="detail" style="border-top-color:var(--cat-delegated)">
+              <h4>委派 Agent ★ <span class="sub">· 30m · ×8</span></h4>
+              <div class="kvgrid">
+                <span class="k">agentType</span><span class="v">general-purpose</span>
+                <span class="k">description</span><span class="v">do thing</span>
+                <span class="k">resolvedModel</span><span class="v">claude-sonnet-5</span>
+                <span class="k">totalDurationMs</span><span class="v">360000</span>
+              </div>
+              <div class="chips">
+                <span class="vchip"><b>500</b> tokens</span>
+                <span class="vchip"><b>3</b> tool calls</span>
+                <span class="vchip ok">async</span>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <button class="btn primary">用 claude 分析此子agent</button>
+                <span class="rep-hint">▸ 树中 ▾ 可展开看内部分解</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="splitter"></div>
+
+        <!-- AiReport -->
+        <div class="pane-bottom">
+          <div class="rep-toolbar">
+            <button class="btn primary">生成整会话分析</button>
+            <button class="btn">导出 .md</button>
+            <button class="btn">打开 claude 终端继续追问</button>
+            <span class="rep-hint">调本机 claude CLI · 流式输出</span>
+            <span class="rep-hint" style="margin-left:auto">session 71598b9d…</span>
+          </div>
+          <div class="md">
+            <h2>会话概要</h2>
+            <p>本会话墙钟 <code>1h32m</code>，其中 <b>等用户 43%</b>、<b>本地工具 50%</b>、LLM 计算仅 7%。</p>
+            <h2>堵塞点</h2>
+            <ul>
+              <li>委派 Agent 占 32%（30m），最大头是 <code>general-purpose · do thing</code>（6m）。</li>
+              <li>等用户间隙合计 40m，含一次 AskUserQuestion。</li>
+            </ul>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <div class="tag">
+      <b>深打磨原型</b><br/>
+      右上 ☀ 切换明暗对比。此页为静态 HTML 预览，确认方向后我会在真实组件上落地。
+    </div>
+
+    <script>
+      const btn = document.getElementById('theme');
+      btn.addEventListener('click', () => {
+        const cur = document.documentElement.dataset.theme;
+        const next = cur === 'dark' ? 'light' : 'dark';
+        document.documentElement.dataset.theme = next;
+        btn.textContent = next === 'dark' ? '☀' : '🌙';
+      });
+    </script>
+  </body>
+</html>

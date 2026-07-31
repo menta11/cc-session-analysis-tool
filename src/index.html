@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Claude 会话耗时分析</title>
+    <style>
+      /* ---------- 设计 token：亮色（默认） ---------- */
+      :root {
+        color-scheme: light;
+
+        /* 表面 / 背景 */
+        --bg: #ffffff;
+        --bg-subtle: #f7f8fa;
+        --bg-elevated: #ffffff;
+        --bg-hover: #f1f3f5;
+        --bg-active: #e9ecef;
+
+        /* 文字 */
+        --text: #1f2937;
+        --text-secondary: #4b5563;
+        --text-tertiary: #6b7280;
+        --text-faint: #9ca3af;
+
+        /* 边框 / 分隔 */
+        --border: #e5e7eb;
+        --border-subtle: #f0f0f0;
+        --border-strong: #d1d5db;
+
+        /* 强调（主操作 / 选中 / 焦点） */
+        --accent: #2563eb;
+        --accent-hover: #1d4ed8;
+        --accent-soft: rgba(37, 99, 235, 0.12);
+        --accent-soft-hover: rgba(37, 99, 235, 0.18);
+        --ring: rgba(37, 99, 235, 0.45);
+        --on-accent: #ffffff;
+
+        /* 语义 */
+        --danger: #b91c1c;
+        --danger-soft: rgba(185, 28, 28, 0.10);
+
+        /* 数据类别色（Okabe-Ito 色盲友好，亮色） */
+        --cat-wait: #6b7280;
+        --cat-direct: #0072b2;
+        --cat-delegated: #d55e00;
+        --cat-compute: #009e73;
+
+        /* 字体 */
+        --font-sans: system-ui, -apple-system, "Segoe UI", "PingFang SC",
+          "Microsoft YaHei", sans-serif;
+        --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas,
+          monospace;
+
+        /* 字号 */
+        --fs-xs: 11px;
+        --fs-sm: 12px;
+        --fs-base: 13px;
+        --fs-md: 14px;
+        --fs-lg: 16px;
+
+        /* 间距（4/8 节奏） */
+        --sp-1: 4px;
+        --sp-2: 8px;
+        --sp-3: 12px;
+        --sp-4: 16px;
+        --sp-5: 24px;
+        --sp-6: 32px;
+
+        /* 圆角 */
+        --r-sm: 4px;
+        --r-md: 6px;
+        --r-lg: 8px;
+
+        /* 阴影 */
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+        --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+
+        /* 过渡 */
+        --transition-fast: 120ms ease-out;
+        --transition: 180ms ease-out;
+      }
+
+      /* ---------- 设计 token：暗色 ---------- */
+      [data-theme="dark"] {
+        color-scheme: dark;
+
+        --bg: #0e1116;
+        --bg-subtle: #161b22;
+        --bg-elevated: #1c232c;
+        --bg-hover: #1f2730;
+        --bg-active: #28323d;
+
+        --text: #e6edf3;
+        --text-secondary: #b9c2cc;
+        --text-tertiary: #8b96a3;
+        --text-faint: #6e7681;
+
+        --border: #2d333b;
+        --border-subtle: #21262d;
+        --border-strong: #3d444d;
+
+        --accent: #4c9ffb;
+        --accent-hover: #6db4fc;
+        --accent-soft: rgba(76, 159, 251, 0.16);
+        --accent-soft-hover: rgba(76, 159, 251, 0.24);
+        --ring: rgba(76, 159, 251, 0.55);
+        --on-accent: #08121f;
+
+        --danger: #f87171;
+        --danger-soft: rgba(248, 113, 113, 0.14);
+
+        /* 暗色下提亮灰、橙、绿以保对比 */
+        --cat-wait: #9ca3af;
+        --cat-direct: #4c9ffb;
+        --cat-delegated: #f59e0b;
+        --cat-compute: #34d399;
+
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+        --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+      }
+
+      /* ---------- base reset ---------- */
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body,
+      #root {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        font-family: var(--font-sans);
+        font-size: var(--fs-base);
+        line-height: 1.5;
+        color: var(--text);
+        background: var(--bg);
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+      }
+
+      /* 键盘焦点环（仅键盘导航显示） */
+      :focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
+        border-radius: var(--r-sm);
+      }
+
+      /* 选中文本 */
+      ::selection {
+        background: var(--accent-soft-hover);
+      }
+
+      /* 滚动条（WebKit） */
+      ::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: var(--border-strong);
+        border-radius: 6px;
+        border: 2px solid transparent;
+        background-clip: content-box;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: var(--text-faint);
+        background-clip: content-box;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      /* 动效偏好 */
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          transition-duration: 0.01ms !important;
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+        }
+      }
+
+      /* ---------- markdown 报告（AiReport） ---------- */
+      .md-report {
+        font-size: var(--fs-base);
+        line-height: 1.6;
+        color: var(--text);
+        word-break: break-word;
+      }
+      .md-report h1,
+      .md-report h2,
+      .md-report h3,
+      .md-report h4 {
+        margin: 12px 0 6px;
+        line-height: 1.3;
+        color: var(--text);
+      }
+      .md-report h1 { font-size: var(--fs-lg); }
+      .md-report h2 {
+        font-size: var(--fs-md);
+        border-bottom: 1px solid var(--border-subtle);
+        padding-bottom: 3px;
+      }
+      .md-report h3 { font-size: var(--fs-base); }
+      .md-report p { margin: 6px 0; }
+      .md-report ul,
+      .md-report ol { margin: 6px 0; padding-left: 22px; }
+      .md-report li { margin: 2px 0; }
+      .md-report table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 8px 0;
+        font-size: var(--fs-sm);
+      }
+      .md-report th,
+      .md-report td {
+        border: 1px solid var(--border);
+        padding: 4px 8px;
+        text-align: left;
+        vertical-align: top;
+      }
+      .md-report th { background: var(--bg-subtle); font-weight: 600; }
+      .md-report tr:nth-child(even) td { background: var(--bg-subtle); }
+      .md-report code {
+        font-family: var(--font-mono);
+        font-size: var(--fs-sm);
+        background: var(--bg-subtle);
+        padding: 1px 4px;
+        border-radius: var(--r-sm);
+      }
+      .md-report pre {
+        background: var(--bg-subtle);
+        padding: var(--sp-2);
+        border-radius: var(--r-md);
+        overflow: auto;
+        margin: 6px 0;
+      }
+      .md-report pre code { background: none; padding: 0; }
+      .md-report blockquote {
+        margin: 6px 0;
+        padding-left: 12px;
+        border-left: 3px solid var(--border-strong);
+        color: var(--text-secondary);
+      }
+      .md-report a { color: var(--accent); }
+    </style>
+    <script>
+      // 首屏前应用主题，避免 FOUC
+      (function () {
+        try {
+          var t = localStorage.getItem("ccsa-theme");
+          if (t === "dark" || t === "light") {
+            document.documentElement.dataset.theme = t;
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>
