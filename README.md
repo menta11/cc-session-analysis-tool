@@ -126,4 +126,4 @@ test/        # vitest 单测 + fixtures + real-sample 模板
 
 ## 许可
 
-私有项目，暂未指定开源许可。
+在 [MIT License](LICENSE) 下发布 — © 2026 刘孟涛

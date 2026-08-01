@@ -132,4 +132,4 @@ The source of truth for behavior is `core/` + `electron/` + `src/`.
 
 ## License
 
-Private project; no open-source license assigned yet.
+Released under the [MIT License](LICENSE) — © 2026 mengtao Liu.
