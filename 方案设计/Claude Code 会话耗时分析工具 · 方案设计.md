@@ -110,7 +110,7 @@ sequenceDiagram
 
 ## 4. 数据模型（递归 Session 树）
 
-ClaudeScope 的扁平 Turn 树，加两个字段（`structuredResult` + `childSession`）即升级为可承载子 agent ��结构化结果的完整模型。
+ClaudeScope 的扁平 Turn 树，加两个字段（`structuredResult` + `childSession`）即升级为可承载子 agent 结构化结果的完整模型。
 
 ```ts
 interface Session {
