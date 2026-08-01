@@ -79,13 +79,10 @@ npx vitest run -t "parses session metadata and turn structure"
 
 ## 真实样本烟雾测试（路径自填）
 
-`test/real-sample*.smoke.test.ts` 硬编码了本机会话绝对路径，**不进版本库**
-（被 `.gitignore` 拦下，本地文件保留不删）。
-
-取而代之，仓库提供路径留空的模板
+仓库提供路径留空的模板
 [`test/real-sample.smoke.template.ts`](./test/real-sample.smoke.template.ts)：
 
-1. 复制为 `test/real-sample.smoke.test.ts`（复制件自动被 ignore，可放心写死本机值）
+1. 复制为 `test/real-sample.smoke.test.ts`
 2. 把 `BASE` / `MAIN` / `PROJECTS_ROOT` 改成你本机的一份会话：
    `~/.claude/projects/<sanitized-cwd>/<sessionId>.jsonl`
 3. 视需要把 `expect(...)` 数值改成你样本的真实值（不同会话数值不重合，模板只做结构性校验）
@@ -121,8 +118,7 @@ test/        # vitest 单测 + fixtures + real-sample 模板
 ## 非源码目录
 
 `调研/`、`原型/`、`方案设计/` 是调研笔记、参考仓库克隆、原型与设计文档，
-**不属于应用代码**。`调研/` 下的 `*.zip` 与 `*-temp/` 临时克隆已被 gitignore，
-仅 `.md` 调研报告进版本库。源代码事实来源是 `core/` + `electron/` + `src/`。
+**不属于应用代码**。源代码事实来源是 `core/` + `electron/` + `src/`。
 
 ## 许可
 
