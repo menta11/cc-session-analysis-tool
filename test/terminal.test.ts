@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { buildResumeCommand, isSessionId, openTerminal } from '../electron/main/terminal'
 
 const ID = '12345678-1234-1234-1234-1234567890ab'
-const CWD = 'C:/Users/jlc/project'
+const CWD = 'C:/Users/example/project'
 
 describe('isSessionId', () => {
   it('接受合法 uuid', () => {
