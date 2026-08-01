@@ -81,14 +81,10 @@ There is no separate lint script; `tsc --noEmit` under `strict` + `noUnusedLocal
 
 ## Real-sample smoke tests (bring your own path)
 
-`test/real-sample*.smoke.test.ts` hard-code a machine-local session path and are
-**not checked in** (gitignored; the local files are kept, not deleted).
-
-Instead, a path-less template is provided:
+A path-less template is provided:
 [`test/real-sample.smoke.template.ts`](./test/real-sample.smoke.template.ts):
 
-1. Copy it to `test/real-sample.smoke.test.ts` (the copy is auto-ignored — write local
-   values freely)
+1. Copy it to `test/real-sample.smoke.test.ts` 
 2. Fill in `BASE` / `MAIN` / `PROJECTS_ROOT` with one of your own sessions:
    `~/.claude/projects/<sanitized-cwd>/<sessionId>.jsonl`
 3. Tune the `expect(...)` values to your sample (counts/durations won't match across
@@ -126,8 +122,7 @@ Electron and React are thin adapters over it.
 ## Non-source directories
 
 `调研/`, `原型/`, `方案设计/` are research notes, reference-repo clones, prototypes,
-and design docs — **not part of the app**. Under `调研/`, the `*.zip` archives and
-`*-temp/` working clones are gitignored; only the `.md` research reports are tracked.
+and design docs — **not part of the app**. 
 The source of truth for behavior is `core/` + `electron/` + `src/`.
 
 ## License
