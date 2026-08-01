@@ -409,7 +409,9 @@ export interface FileMeta {
 }
 
 export interface FileMapOpts {
+  /** relOf 的基准 = 会话所在目录（projects/<sanitized-cwd>/），主/子文件相对它显示。 */
   projectsRoot: string
+  /** 主 transcript 绝对路径；空串 = 未找到（node 模式 agentId 缺失时）。 */
   mainFilePath: string
   /** agentId → 子 transcript 绝对路径（来自 buildAgentIndex，覆盖本会话所有后代）。 */
   agentIndex: Map<string, string>
@@ -526,8 +528,9 @@ export function buildFileMap(session: Session, opts: FileMapOpts): string {
   // 主文件
   const meta = opts.fileMeta?.(opts.mainFilePath) ?? null
   const metaParts = [meta?.lines != null ? `${meta.lines} 行` : '', fmtSize(meta?.sizeBytes)].filter(Boolean)
+  const mainRel = opts.mainFilePath ? relOf(opts.mainFilePath, opts.projectsRoot) : '(未找到文件)'
   lines.push('## 主文件')
-  lines.push(`- ${relOf(opts.mainFilePath, opts.projectsRoot)}${metaParts.length ? `（${metaParts.join(' / ')}）` : ''}`)
+  lines.push(`- ${mainRel}${metaParts.length ? `（${metaParts.join(' / ')}）` : ''}`)
   lines.push('')
 
   // 子agent 文件全量（紧凑：路径优先，claude 按需 Read）

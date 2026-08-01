@@ -127,8 +127,11 @@ isolation. Electron and React are thin adapters over `core/`.
 ### `electron/` — the host process
 - `main/index.ts` — Electron main: window/menu/IPC. `session:load` parses + links + caches
   the `Session` (with `agentIndex` + `projectsRoot`) in a `sessionCache` map so `analyze:run`
-  can reassemble the prompt in-process. `analyze:run` streams chunks back via
-  `analyze:chunk` IPC. `terminal:open` opens an OS terminal on `claude --resume <id>`.
+  can reassemble the prompt in-process. `projectsRoot` must be the **session's parent dir**
+  (`dirname(path minus .jsonl)`), NOT the session dir itself — otherwise `relOf` strips the
+  whole `<sessionId>.jsonl` down to `.jsonl` (regression covered in `fileMap.test.ts`).
+  `analyze:run` streams chunks back via `analyze:chunk` IPC. `terminal:open` opens an OS
+  terminal on `claude --resume <id>`.
 - `main/claudeCli.ts` — spawns the local `claude` CLI. **Key Windows quirk**: `claude` is a
   `.cmd` shim that needs `shell:true`, so argv is unsafe (cmd.exe would slice `|` in tables).
   The system prompt is therefore **inlined into stdin** (`buildStdin`), never passed as

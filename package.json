@@ -1,6 +1,6 @@
 {
   "name": "cc-session-analysis-tool",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "author": "menta11",
   "description": "Claude Code 会话耗时分析工具 — 递归工作/等待分解 + AI 堵塞点分析（Electron 桌面应用）",

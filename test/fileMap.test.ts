@@ -47,3 +47,32 @@ describe('buildFileMap', () => {
     expect(map).not.toContain('## 并行组')
   })
 })
+
+describe('buildFileMap 真实传参形态（projectsRoot = 会话所在目录）', () => {
+  const session = parseLines(lines, 'm')
+  // 与 electron/main/index.ts session:load 的缓存形态一致：
+  // mainFilePath = 绝对路径 <projects>/<cwd>/<id>.jsonl
+  // projectsRoot = dirname(去掉 .jsonl 的会话目录) = <projects>/<cwd>
+  const id = 'abc-123'
+  const projectsRoot = '/fake/projects/F--repo'
+  const mainFilePath = `${projectsRoot}/${id}.jsonl`
+  const agentIndex = new Map<string, string>([['c', `${projectsRoot}/${id}/subagents/agent-c.jsonl`]])
+
+  it('主文件剥成 <sessionId>.jsonl 而非 ".jsonl"', () => {
+    const map = buildFileMap(session, { projectsRoot, mainFilePath, agentIndex })
+    expect(map).toContain(`## 主文件\n- ${id}.jsonl`)
+    expect(map).not.toContain('main.jsonl')
+  })
+
+  it('子agent 文件带会话目录前缀，可拼回绝对路径', () => {
+    const map = buildFileMap(session, { projectsRoot, mainFilePath, agentIndex })
+    expect(map).toContain(`${id}/subagents/agent-c.jsonl`)
+    // projectsRoot 基准行存在，claude 可拼接
+    expect(map).toContain(`projectsRoot = ${projectsRoot}`)
+  })
+
+  it('mainFilePath 为空串时主文件显示 (未找到文件)', () => {
+    const map = buildFileMap(session, { projectsRoot, mainFilePath: '', agentIndex })
+    expect(map).toContain('- (未找到文件)')
+  })
+})

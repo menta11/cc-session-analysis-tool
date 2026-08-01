@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron'
 import { promises as fs } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { scanProjects } from '../../core/discovery/scan'
 import { parseJsonl } from '../../core/parser/parse'
 import { buildAgentIndex } from '../../core/discovery/agentIndex'
@@ -19,7 +19,8 @@ interface CachedSession {
   session: Session
   agentIndex: Map<string, string>
   mainFilePath: string
-  /** relOf 的基准（会话目录），子 agent 文件相对它显示。 */
+  /** relOf 的基准 = 会话所在目录（projects/<sanitized-cwd>/），主/子文件相对它显示。
+   *  注意不是会话目录本身 —— 否则主文件路径会被剥成 ".jsonl"。 */
   projectsRoot: string
 }
 const sessionCache = new Map<string, CachedSession>()
@@ -78,7 +79,13 @@ app.whenReady().then(() => {
     const index = buildAgentIndex(sessionDir)
     const session = parseJsonl(path)
     linkSubagents(session, index, (p) => parseJsonl(p, { subagent: true }))
-    sessionCache.set(path, { session, agentIndex: index, mainFilePath: path, projectsRoot: sessionDir })
+    sessionCache.set(path, {
+      session,
+      agentIndex: index,
+      mainFilePath: path,
+      // 基准 = 会话所在目录：主文件剥成 <sessionId>.jsonl，子agent 剥成 <sessionId>/subagents/...
+      projectsRoot: dirname(sessionDir),
+    })
     return session
   })
 
