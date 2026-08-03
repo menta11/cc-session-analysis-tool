@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Session } from '../core/parser/types'
 import type { SessionRef } from '../core/discovery/scan'
 import type { TreeNode } from '../core/view/treeView'
@@ -38,6 +38,28 @@ export function App(): JSX.Element {
   const [reports, setReports] = useState<Record<string, ReportState>>({})
   const cur = reports[selectedPath ?? ''] ?? EMPTY_REPORT
   const [theme, setTheme] = useState<Theme>(getInitialTheme)
+  const [sidebarW, setSidebarW] = useState(300)
+  // 左侧目录栏宽度拖拽（垂直分隔条）
+  const [sidebarDragging, setSidebarDragging] = useState(false)
+  const sidebarDragRef = useRef(false)
+  const startSidebarDrag = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    sidebarDragRef.current = true
+    setSidebarDragging(true)
+    const mm = (ev: MouseEvent): void => {
+      if (!sidebarDragRef.current) return
+      const w = Math.min(520, Math.max(180, ev.clientX))
+      setSidebarW(w)
+    }
+    const up = (): void => {
+      sidebarDragRef.current = false
+      setSidebarDragging(false)
+      window.removeEventListener('mousemove', mm)
+      window.removeEventListener('mouseup', up)
+    }
+    window.addEventListener('mousemove', mm)
+    window.addEventListener('mouseup', up)
+  }, [])
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -134,12 +156,19 @@ export function App(): JSX.Element {
       </header>
 
       <div style={shellStyle}>
-        <aside style={sidebarStyle}>
+        <aside style={{ ...sidebarStyle, width: sidebarW }}>
           <div style={sidebarHeaderStyle}>会话</div>
           <div style={{ flex: 1, minHeight: 0 }}>
             <SessionList sessions={sessions} onSelect={load} selectedPath={selectedPath} />
           </div>
         </aside>
+        <div
+          onMouseDown={startSidebarDrag}
+          className={`splitter-v${sidebarDragging ? ' is-dragging' : ''}`}
+          style={sidebarSplitterStyle}
+          role="separator"
+          aria-orientation="vertical"
+        />
 
         <main style={mainStyle}>
           {session ? (
@@ -310,12 +339,19 @@ const shellStyle: React.CSSProperties = {
 }
 
 const sidebarStyle: React.CSSProperties = {
-  width: 300,
-  borderRight: '1px solid var(--border)',
   flexShrink: 0,
   display: 'flex',
   flexDirection: 'column',
   background: 'var(--bg-subtle)',
+  minWidth: 0,
+}
+
+const sidebarSplitterStyle: React.CSSProperties = {
+  width: 6,
+  cursor: 'col-resize',
+  flexShrink: 0,
+  background: 'var(--border)',
+  transition: 'background var(--transition-fast)',
 }
 
 const sidebarHeaderStyle: React.CSSProperties = {

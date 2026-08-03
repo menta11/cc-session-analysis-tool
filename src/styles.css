@@ -114,6 +114,16 @@
   background: var(--accent);
 }
 
+/* 垂直分隔条（左侧目录栏 ↔ 功能区） */
+.splitter-v {
+  cursor: col-resize;
+  transition: background var(--transition-fast);
+}
+.splitter-v:hover,
+.splitter-v.is-dragging {
+  background: var(--accent);
+}
+
 /* ---------- 时间树行内细节 ---------- */
 .tt-row {
   cursor: pointer;
@@ -253,4 +263,12 @@
   max-height: 80px;
   overflow: auto;
   font-size: var(--fs-sm);
+}
+
+/* ---------- 复制成功提示动画 ---------- */
+@keyframes fadeInOut {
+  0% { opacity: 0; transform: translateY(4px); }
+  15% { opacity: 1; transform: translateY(0); }
+  85% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(4px); }
 }
