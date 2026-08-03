@@ -190,6 +190,7 @@ isolation. Electron and React are thin adapters over `core/`.
 
 ## Non-source directories
 
-`调研/`, `原型/`, `方案设计/` are research notes, reference-repo clones, prototypes, and
-design docs — **not** part of the app. Don't edit code there or treat those trees as
-authoritative for current behavior; the source of truth is `core/` + `electron/` + `src/`.
+`docs/调研/`, `docs/原型/`, `docs/方案设计/` are research notes, reference-repo clones,
+prototypes, and design docs — **not** part of the app. Don't edit code there or treat those
+trees as authoritative for current behavior; the source of truth is `core/` + `electron/` +
+`src/`.

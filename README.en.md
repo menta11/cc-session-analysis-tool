@@ -121,8 +121,8 @@ Electron and React are thin adapters over it.
 
 ## Non-source directories
 
-`调研/`, `原型/`, `方案设计/` are research notes, reference-repo clones, prototypes,
-and design docs — **not part of the app**. 
+`docs/调研/`, `docs/原型/`, `docs/方案设计/` are research notes, reference-repo clones,
+prototypes, and design docs — **not part of the app**. 
 The source of truth for behavior is `core/` + `electron/` + `src/`.
 
 ## License

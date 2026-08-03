@@ -32,9 +32,9 @@ desktop.ini
 .env.local
 .claude/
 
-# 调研/ 参考仓库：忽略压缩包与解压临时克隆，保留 .md 调研报告
-调研/*.zip
-调研/*-temp/
+# docs/调研/ 参考仓库：忽略压缩包与解压临时克隆，保留 .md 调研报告
+docs/调研/*.zip
+docs/调研/*-temp/
 
 # real-sample 烟雾测试硬编码本机会话绝对路径，不进版本库。
 # 从 test/real-sample.smoke.template.ts 复制为 .test.ts 并填入你本机路径后再跑。
