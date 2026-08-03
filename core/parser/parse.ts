@@ -73,7 +73,7 @@ export function parseLines(lines: Iterable<string>, sessionIdFallback = 'unknown
     gitBranch = gitBranch ?? (typeof obj.gitBranch === 'string' ? obj.gitBranch : null)
     version = version ?? (typeof obj.version === 'string' ? obj.version : null)
 
-    // 墙钟跨度取所有记录（含 system/progress）的时间戳 min/max，避免漏末尾 system 事件
+    // 总耗时跨度取所有记录（含 system/progress）的时间戳 min/max，避免漏末尾 system 事件
     const wallTs = parseTimestamp(obj.timestamp)
     if (wallTs != null) {
       if (wallStart == null || wallTs < wallStart) wallStart = wallTs

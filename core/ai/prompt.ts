@@ -8,7 +8,7 @@ import { unionDuration } from '../model/timeline'
 /** 节点诊断时传入：父会话中调度该子 agent 的 ToolCall（用于父子时间对账）。 */
 export interface DigestOpts {
   parentAgentCall?: ToolCall | null
-  /** 父会话墙钟（节点诊断时附"占父墙钟%"概览）。 */
+  /** 父会话总耗时（节点诊断时附"占父总耗时%"概览）。 */
   parentWallMs?: number | null
 }
 
@@ -64,7 +64,7 @@ function countSubagents(session: Session): number {
   return n
 }
 
-/** 子 agent 实际墙钟：优先 childSession，回退父侧 durationMs。 */
+/** 子 agent 实际总耗时：优先 childSession，回退父侧 durationMs。 */
 function agentWall(tc: ToolCall): number {
   const child = tc.childSession
   if (child?.startedAt != null && child?.endedAt != null) return child.endedAt - child.startedAt
@@ -106,7 +106,7 @@ interface Bucket {
   total: number
 }
 
-/** 时序分桶（阶段划分底料）：墙钟等分 N 段，每段各类 unionDuration。自适应段数 5–40。 */
+/** 时序分桶（阶段划分底料）：总耗时等分 N 段，每段各类 unionDuration。自适应段数 5–40。 */
 function timeBuckets(session: Session, ci: CategoryIntervals): Bucket[] {
   const start = session.startedAt
   const end = session.endedAt
@@ -282,10 +282,10 @@ export function buildDigest(session: Session, opts: DigestOpts = {}): string {
   const lines: string[] = []
   lines.push('# Agent 运行耗时摘要')
   lines.push(
-    `- 墙钟 ${fmtMs(b.wallMs)} | 轮次 ${session.turns.length} | 子agent ${countSubagents(session)} | isSubagent=${session.isSubagent}`,
+    `- 总耗时 ${fmtMs(b.wallMs)} | 轮次 ${session.turns.length} | 子agent ${countSubagents(session)} | isSubagent=${session.isSubagent}`,
   )
   if (opts.parentWallMs != null && opts.parentWallMs > 0) {
-    lines.push(`- 占父墙钟 ${pct(b.wallMs, opts.parentWallMs)}% ${bar(b.wallMs, opts.parentWallMs, 10)}`)
+    lines.push(`- 占父总耗时 ${pct(b.wallMs, opts.parentWallMs)}% ${bar(b.wallMs, opts.parentWallMs, 10)}`)
   }
   lines.push(`- 等用户 ${fmtMs(b.waitUserMs)} (${pp(b.waitUserMs)}) ${bar(b.waitUserMs, b.wallMs, 10)}`)
   lines.push(

@@ -197,7 +197,7 @@ function Row(props: {
   )
 }
 
-/** 子 agent 展开：其分解树子节点，甘特仍按 root 墙钟定位（绝对 ts）。 */
+/** 子 agent 展开：其分解树子节点，甘特仍按 root 总耗时定位（绝对 ts）。 */
 function ChildTree(props: {
   child: Session
   depth: number

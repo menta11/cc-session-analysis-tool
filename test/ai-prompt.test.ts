@@ -26,7 +26,7 @@ describe('buildDigest', () => {
   it('含概览/三类分解/时序分桶/诊断事实/子agent全量表', () => {
     const s = buildSession()
     const d = buildDigest(s)
-    expect(d).toContain('墙钟')
+    expect(d).toContain('总耗时')
     expect(d).toContain('等用户')
     expect(d).toContain('本地工具')
     expect(d).toContain('模型思考') // 口径改名，不再是 LLM(think+output)

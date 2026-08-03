@@ -50,7 +50,7 @@ describe('buildTreeNode', () => {
     expect(delegated.count).toBe(1)
     const agent = delegated.children![0]
     expect(agent.kind).toBe('agent')
-    expect(agent.ms).toBe(100_000) // 子 agent 墙钟（11k→111k）
+    expect(agent.ms).toBe(100_000) // 子 agent 总耗时（11k→111k）
     expect(agent.expandable).toBe(true)
     expect(agent.childSession).toBeDefined()
     expect(agent.label).toContain('general-purpose')

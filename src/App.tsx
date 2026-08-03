@@ -113,12 +113,15 @@ export function App(): JSX.Element {
               <span style={{ ...dotStyle, background: 'var(--cat-compute)' }} />
               <b>{session.sessionId.slice(0, 8)}</b>
             </span>
-            <span className="chip" style={chipStyle}>墙钟 <b>{fmtMs(wallMs)}</b></span>
-            {projectLabel ? <span className="chip" style={chipStyle}>项目 <b>{projectLabel}</b></span> : null}
+            <span className="chip" style={chipStyle}>总耗时 <b>{fmtMs(wallMs)}</b></span>
+            {projectLabel ? (
+              <span className="chip" style={projectChipStyle} title={`项目 ${projectLabel}`}>
+                项目 <b style={pathStyle}>{projectLabel}</b>
+              </span>
+            ) : null}
             {curRef ? <span className="chip" style={chipStyle}>{fmtRelative(curRef.mtimeMs)}</span> : null}
           </span>
         ) : null}
-        <span style={{ flex: 1 }} />
         <button
           type="button"
           onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
@@ -219,10 +222,12 @@ const appStyle: React.CSSProperties = {
 
 const appbarStyle: React.CSSProperties = {
   display: 'flex',
+  flexWrap: 'wrap',
   alignItems: 'center',
+  rowGap: 'var(--sp-1)',
   gap: 'var(--sp-3)',
-  padding: '0 var(--sp-3)',
-  height: 44,
+  padding: 'var(--sp-1) var(--sp-3)',
+  minHeight: 44,
   borderBottom: '1px solid var(--border)',
   background: 'var(--bg-subtle)',
   flexShrink: 0,
@@ -235,6 +240,7 @@ const brandStyle: React.CSSProperties = {
   fontWeight: 700,
   fontSize: 'var(--fs-md)',
   whiteSpace: 'nowrap',
+  flexShrink: 0,
 }
 
 const logoStyle: React.CSSProperties = {
@@ -252,9 +258,12 @@ const logoStyle: React.CSSProperties = {
 
 const metabarStyle: React.CSSProperties = {
   display: 'flex',
+  flexWrap: 'wrap',
+  rowGap: 'var(--sp-1)',
   alignItems: 'center',
-  gap: 'var(--sp-1)',
+  gap: 'var(--sp-2)',
   marginLeft: 'var(--sp-2)',
+  flex: '1 1 auto',
   minWidth: 0,
 }
 
@@ -269,6 +278,23 @@ const chipStyle: React.CSSProperties = {
   color: 'var(--text-secondary)',
   fontSize: 'var(--fs-xs)',
   whiteSpace: 'nowrap',
+  flexShrink: 0,
+}
+
+// 项目 chip：路径可很长，单独允许收缩 + 截断，完整路径放 title
+const projectChipStyle: React.CSSProperties = {
+  ...chipStyle,
+  flexShrink: 1,
+  minWidth: 0,
+  maxWidth: '32ch',
+}
+
+const pathStyle: React.CSSProperties = {
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  minWidth: 0,
+  fontWeight: 600,
 }
 
 const dotStyle: React.CSSProperties = {
@@ -314,6 +340,7 @@ const iconBtnStyle: React.CSSProperties = {
   color: 'var(--text-secondary)',
   borderRadius: 'var(--r-sm)',
   cursor: 'pointer',
+  flexShrink: 0,
   transition: 'background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast)',
 }
 const mainStyle: React.CSSProperties = { flex: 1, minWidth: 0 }

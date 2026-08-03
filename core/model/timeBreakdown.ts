@@ -6,11 +6,11 @@ export interface CategoryIntervals {
   waitUser: Interval[] // AskUserQuestion + 轮间间隙
   direct: Interval[]
   delegated: Interval[]
-  compute: Interval[] // 墙钟内"工具/等待覆盖"的补集 = 模型思考时段
+  compute: Interval[] // 总耗时内"工具/等待覆盖"的补集 = 模型思考时段
 }
 
 /**
- * 收集会话各类活动的墙钟区间（甘特时序用）。
+ * 收集会话各类活动的总耗时区间（甘特时序用）。
  *  - waitUser = AskUserQuestion 区间 + 轮间间隙(等用户输入)。
  *  - compute  = [startedAt, endedAt] 内 (waitUser ∪ direct ∪ delegated) 的补集。
  */
@@ -22,7 +22,7 @@ export function sessionIntervals(session: Session): CategoryIntervals {
     for (const tc of turn.toolCalls) {
       const kind = classifyTool(tc.name)
       if (kind === 'delegated') {
-        // 用子 agent 实际墙钟（异步后台 agent 的真实运行时长）；无 child 退回父侧调度区间
+        // 用子 agent 实际总耗时（异步后台 agent 的真实运行时长）；无 child 退回父侧调度区间
         const child = tc.childSession
         if (child && child.startedAt != null && child.endedAt != null) {
           delegated.push({ start: child.startedAt, end: child.endedAt })
@@ -36,8 +36,8 @@ export function sessionIntervals(session: Session): CategoryIntervals {
       }
     }
   }
-  // 方案A：墙钟一维，每一秒只归一类。等用户让出与"本地工具(含后台 agent)"重叠的部分
-  // （人离开但后台 agent 在跑 → 算委派，不算空闲）→ 等用户 = 真空闲，sum 严格 = 墙钟。
+  // 方案A：总耗时一维，每一秒只归一类。等用户让出与"本地工具(含后台 agent)"重叠的部分
+  // （人离开但后台 agent 在跑 → 算委派，不算空闲）→ 等用户 = 真空闲，sum 严格 = 总耗时。
   const activity = [...direct, ...delegated]
   const rawWait = session.isSubagent ? askUser : [...askUser, ...interTurnGaps(session)]
   const waitUser = rawWait.flatMap((iv) => complement(activity, iv.start, iv.end))
@@ -48,7 +48,7 @@ export function sessionIntervals(session: Session): CategoryIntervals {
 }
 
 /**
- * 节点墙钟时间分解（对齐后模型）：wallMs = 等用户 + 本地工具 + compute。
+ * 节点总耗时时间分解（对齐后模型）：wallMs = 等用户 + 本地工具 + compute。
  * 详见模型说明；此处 ms 全部由 sessionIntervals 的区间并集派生，保证与甘特一致。
  */
 export function breakdownOf(session: Session): NodeTime {

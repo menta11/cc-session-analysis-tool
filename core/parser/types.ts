@@ -101,7 +101,7 @@ export type StructuredResult =
       resolvedModel: string | null
     }
 
-/** 节点墙钟时间分解（P3，对齐后模型）。wallMs = waitUser + localTool + compute。 */
+/** 节点总耗时时间分解（P3，对齐后模型）。wallMs = waitUser + localTool + compute。 */
 export interface NodeTime {
   wallMs: number
   waitUserMs: number // 轮间间隙(等用户输入) + AskUserQuestion 区间

@@ -12,7 +12,18 @@ export function SessionList(props: {
   const [open, setOpen] = useState<Record<string, boolean>>({})
 
   const q = query.trim().toLowerCase()
-  const filtered = q ? props.sessions.filter((s) => s.sessionId.toLowerCase().includes(q)) : props.sessions
+  const filtered = useMemo(
+    () =>
+      q
+        ? props.sessions.filter(
+            (s) =>
+              s.sessionId.toLowerCase().includes(q) ||
+              s.project.toLowerCase().includes(q) ||
+              decodeProjectDir(s.project).toLowerCase().includes(q),
+          )
+        : props.sessions,
+    [q, props.sessions],
+  )
 
   const groups = useMemo(() => {
     const m = new Map<string, SessionRef[]>()
@@ -30,42 +41,72 @@ export function SessionList(props: {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <input
         className="input"
-        placeholder="搜索会话 ID…"
+        placeholder="搜会话 ID 或目录…"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         style={{ margin: 'var(--sp-2)' }}
       />
       <div style={{ flex: 1, overflow: 'auto' }}>
-        {q
-          ? filtered.map((s) => <Row key={s.path} s={s} onSelect={props.onSelect} selected={props.selectedPath === s.path} />)
-          : groups.map(([proj, sess]) => (
-              <div key={proj}>
-                <div
-                  className="row"
-                  onClick={() => toggle(proj)}
+        {groups.map(([proj, sess]) => (
+          <div key={proj}>
+            <div
+              className="row"
+              onClick={() => toggle(proj)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--sp-1)',
+                padding: '6px 10px',
+                background: 'var(--bg-active)',
+                fontWeight: 600,
+                fontSize: 'var(--fs-sm)',
+                borderBottom: '1px solid var(--border)',
+                color: 'var(--text-secondary)',
+              }}
+            >
+              <Chevron open={!!open[proj]} />
+              <span
+                style={{
+                  flex: 1,
+                  overflow: 'hidden',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  minWidth: 0,
+                }}
+                title={`${decodeProjectDir(proj)}\n${proj}`}
+              >
+                <span
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 'var(--sp-1)',
-                    padding: '6px 10px',
-                    background: 'var(--bg-active)',
-                    fontWeight: 600,
-                    fontSize: 'var(--fs-sm)',
-                    borderBottom: '1px solid var(--border)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 'var(--fs-xs)',
                     color: 'var(--text-secondary)',
                   }}
                 >
-                  <Chevron open={!!open[proj]} />
-                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {decodeProjectDir(proj)}
-                  </span>
-                  <span style={{ color: 'var(--text-faint)', fontWeight: 400 }}>({sess.length})</span>
-                </div>
-                {open[proj]
-                  ? sess.map((s) => <Row key={s.path} s={s} onSelect={props.onSelect} selected={props.selectedPath === s.path} />)
-                  : null}
-              </div>
-            ))}
+                  {proj}
+                </span>
+                <span
+                  style={{
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    color: 'var(--text-faint)',
+                    fontWeight: 400,
+                    fontSize: 'var(--fs-xs)',
+                  }}
+                >
+                  {decodeProjectDir(proj)}
+                </span>
+              </span>
+              <span style={{ color: 'var(--text-faint)', fontWeight: 400 }}>({sess.length})</span>
+            </div>
+            {open[proj]
+              ? sess.map((s) => <Row key={s.path} s={s} onSelect={props.onSelect} selected={props.selectedPath === s.path} />)
+              : null}
+          </div>
+        ))}
       </div>
     </div>
   )

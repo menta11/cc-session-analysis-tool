@@ -23,7 +23,7 @@ export interface TreeNode {
   kind: NodeKind
   label: string
   ms: number
-  /** 归一基准（顶层会话墙钟），用于占比/横条。 */
+  /** 归一基准（顶层会话总耗时），用于占比/横条。 */
   wallMs: number
   /** 主色（占比横条用）。 */
   color: string
@@ -37,13 +37,13 @@ export interface TreeNode {
   call?: ToolCall
   /** agent 节点：展开用的子会话。 */
   childSession?: Session
-  /** 甘特时段（绝对 ts，渲染按 root 墙钟归一）。 */
+  /** 甘特时段（绝对 ts，渲染按 root 总耗时归一）。 */
   segments?: Segment[]
 }
 
 const seg = (iv: { start: number; end: number }, color: string): Segment => ({ start: iv.start, end: iv.end, color })
 
-/** Agent 调用的"实际运行区间"：优先子 agent 墙钟（异步后台的真实时长），否则父侧调度区间。 */
+/** Agent 调用的"实际运行区间"：优先子 agent 总耗时（异步后台的真实时长），否则父侧调度区间。 */
 function childWallOf(tc: ToolCall): { start: number; end: number } | null {
   const c = tc.childSession
   if (c && c.startedAt != null && c.endedAt != null) return { start: c.startedAt, end: c.endedAt }
@@ -53,7 +53,7 @@ function childWallOf(tc: ToolCall): { start: number; end: number } | null {
 
 /**
  * 把 Session 转成显示树：root → 等用户 / 本地工具(direct[Bash/other] + delegated[agent…递归]) / compute。
- * 每个节点带 主色 + 甘特 segments（墙钟区间），纯数据变换便于单测。
+ * 每个节点带 主色 + 甘特 segments（总耗时区间），纯数据变换便于单测。
  */
 export function buildTreeNode(session: Session): TreeNode {
   const b = breakdownOf(session)

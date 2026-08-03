@@ -84,8 +84,8 @@ describe('sessionIntervals + complement（甘特数据）', () => {
   })
 })
 
-describe('方案A：后台 agent 与等用户重叠 → 等用户让出（sum=墙钟）', () => {
-  it('async agent 子墙钟覆盖整个轮间间隙 → 等用户=0，重叠归委派', () => {
+describe('方案A：后台 agent 与等用户重叠 → 等用户让出（sum=总耗时）', () => {
+  it('async agent 子总耗时覆盖整个轮间间隙 → 等用户=0，重叠归委派', () => {
     const s = parseLines(
       [
         '{"type":"user","uuid":"u1","timestamp":"2026-04-24T12:00:00.000Z","sessionId":"m","message":{"role":"user","content":"go"}}',
@@ -96,7 +96,7 @@ describe('方案A：后台 agent 与等用户重叠 → 等用户让出（sum=�
       ],
       'm',
     )
-    // 异步后台 agent：子墙钟 [5k,65k] 正好覆盖整个轮间间隙 [5k,65k]
+    // 异步后台 agent：子总耗时 [5k,65k] 正好覆盖整个轮间间隙 [5k,65k]
     s.turns[0].toolCalls[0].childSession = parseLines(
       [
         '{"type":"user","uuid":"cu1","timestamp":"2026-04-24T12:00:05.000Z","sessionId":"c","message":{"role":"user","content":"sub"}}',
@@ -105,9 +105,9 @@ describe('方案A：后台 agent 与等用户重叠 → 等用户让出（sum=�
       'c',
     )
     const b = breakdownOf(s)
-    expect(b.delegatedMs).toBe(60_000) // 子墙钟 [5k,65k]
+    expect(b.delegatedMs).toBe(60_000) // 子总耗时 [5k,65k]
     expect(b.waitUserMs).toBe(0) // 轮间间隙被 agent 全覆盖 → 让出 → 真空闲 0
     expect(b.computeMs).toBe(6_000) // [0,5k] + [65k,66k]
-    expect(b.waitUserMs + b.localToolMs + b.computeMs).toBe(b.wallMs) // sum 严格 = 墙钟
+    expect(b.waitUserMs + b.localToolMs + b.computeMs).toBe(b.wallMs) // sum 严格 = 总耗时
   })
 })

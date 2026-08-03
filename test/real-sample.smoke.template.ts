@@ -78,7 +78,7 @@ describe.skipIf(!existsSync(MAIN))('real sample — breakdown wall-clock invaria
       compute: fmt(b.computeMs),
     })
 
-    // 对账：三段之和 ≈ 墙钟（允许 clamp 微差）
+    // 对账：三段之和 ≈ 总耗时（允许 clamp 微差）
     expect(Math.abs(b.waitUserMs + b.localToolMs + b.computeMs - b.wallMs)).toBeLessThanOrEqual(2000)
     expect(b.computeMs).toBeGreaterThanOrEqual(0)
   })
@@ -120,7 +120,7 @@ describe.skipIf(!existsSync(MAIN))('real sample — digest & fileMap & analyze r
 
   it('digest 不崩、含各段、体积有界', () => {
     const d = buildDigest(session)
-    expect(d).toContain('墙钟')
+    expect(d).toContain('总耗时')
     expect(d).toContain('## 时序分桶')
     expect(d).toContain('## 诊断事实')
     expect(d.length).toBeGreaterThan(500)
@@ -155,6 +155,6 @@ describe.skipIf(!existsSync(MAIN))('real sample — digest & fileMap & analyze r
     })
     const stdin = buildStdin(systemPrompt, userMessage)
     expect(stdin).toContain('父子对账')
-    expect(stdin).toContain('占父墙钟')
+    expect(stdin).toContain('占父总耗时')
   })
 })

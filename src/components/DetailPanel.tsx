@@ -53,7 +53,7 @@ export function DetailPanel(props: {
       {n.kind === 'agent' && n.call ? <AgentDetail node={n} onAnalyzeAgent={props.onAnalyzeAgent} /> : null}
       {n.kind === 'toolBucket' ? <BucketDetail node={n} /> : null}
       {n.kind === 'waitUser' ? <Hint>轮间间隙（等用户输入）+ AskUserQuestion 区间合计。</Hint> : null}
-      {n.kind === 'compute' ? <Hint>LLM 思考+输出（墙钟扣除工具/等待后的补集；含不可剥离的间隙）。</Hint> : null}
+      {n.kind === 'compute' ? <Hint>LLM 思考+输出（总耗时扣除工具/等待后的补集；含不可剥离的间隙）。</Hint> : null}
     </div>
   )
 }
