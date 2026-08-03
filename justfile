@@ -26,6 +26,16 @@ build:
 preview:
     npm run preview
 
+# 构建 Windows 安装包 (NSIS + portable) -> dist/
+# 设置工具链镜像（国内网络 GitHub 超时）
+dist-win: build
+    set ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/
+    npm run dist:win
+
+# 构建 macOS 安装包 (dmg + zip) -> dist/
+dist-mac: build
+    npm run dist:mac
+
 # 类型检查 (node + web 两套 tsconfig)
 typecheck:
     npm run typecheck
