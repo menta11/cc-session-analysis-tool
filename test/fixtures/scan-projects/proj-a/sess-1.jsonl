@@ -1,0 +1,4 @@
+{"type":"user","uuid":"u1","parentUuid":null,"isSidechain":false,"timestamp":"2026-07-14T08:07:01.000Z","sessionId":"sess-1","cwd":"d:\\project\\请假审批","gitBranch":"main","version":"2.1.209","message":{"role":"user","content":"开始请假审批系统"}}
+{"type":"user","uuid":"u2","parentUuid":"u1","isSidechain":false,"timestamp":"2026-07-14T08:07:02.000Z","sessionId":"sess-1","cwd":"d:\\project\\请假审批","message":{"role":"user","content":"[Request interrupted by user for tool use]"}}
+{"type":"ai-title","sessionId":"sess-1","aiTitle":"请假审批系统Spec开发","timestamp":"2026-07-14T08:07:05.000Z"}
+{"type":"assistant","uuid":"a1","parentUuid":"u1","isSidechain":false,"timestamp":"2026-07-14T08:07:03.000Z","sessionId":"sess-1","cwd":"d:\\project\\请假审批","message":{"model":"claude-sonnet-4-6","role":"assistant","content":[{"type":"text","text":"好的"}]}}

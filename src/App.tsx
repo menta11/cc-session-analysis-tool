@@ -98,7 +98,7 @@ export function App(): JSX.Element {
   // 当前选中会话的 ref（取 mtime / size）
   const curRef = sessions.find((s) => s.path === selectedPath)
   const wallMs = session && session.startedAt != null && session.endedAt != null ? session.endedAt - session.startedAt : 0
-  const projectLabel = curRef ? decodeProjectDir(curRef.project) : ''
+  const projectLabel = curRef ? curRef.cwd ?? decodeProjectDir(curRef.project) : ''
 
   return (
     <div style={appStyle}>
@@ -111,7 +111,7 @@ export function App(): JSX.Element {
           <span style={metabarStyle}>
             <span className="chip" style={chipStyle}>
               <span style={{ ...dotStyle, background: 'var(--cat-compute)' }} />
-              <b>{session.sessionId.slice(0, 8)}</b>
+              <b>{curRef?.aiTitle ?? session.sessionId.slice(0, 8)}</b>
             </span>
             <span className="chip" style={chipStyle}>总耗时 <b>{fmtMs(wallMs)}</b></span>
             {projectLabel ? (
