@@ -3,6 +3,16 @@ import type { Session } from '../../core/parser/types'
 import { buildTreeNode, type Segment, type TreeNode } from '../../core/view/treeView'
 import { fmtMs, pct } from '../../core/view/format'
 
+/** 复制文本到剪贴板，返回是否成功（Electron 渲染进程支持 navigator.clipboard） */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    return false
+  }
+}
+
 const GANTT_W = 320
 const GANTT_MIN = 200
 const GANTT_MAX = 720
@@ -27,6 +37,16 @@ export function TimeTree(props: {
   const [ganttW, setGanttW] = useState(GANTT_W)
   const [dragging, setDragging] = useState(false)
   const dragRef = useRef<{ startX: number; startW: number } | null>(null)
+  const [copiedTip, setCopiedTip] = useState<string | null>(null)
+  const copiedTimerRef = useRef<number | null>(null)
+
+  /** 复制并显示提示气泡 1 秒 */
+  const handleCopy = (text: string, tip: string): void => {
+    void copyText(text)
+    setCopiedTip(tip)
+    if (copiedTimerRef.current) window.clearTimeout(copiedTimerRef.current)
+    copiedTimerRef.current = window.setTimeout(() => setCopiedTip(null), 1000)
+  }
 
   const onHandleDown = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -66,7 +86,16 @@ export function TimeTree(props: {
         }}
       >
         <span style={{ width: CHEVRON }} />
-        <span style={{ flex: 1 }}>{tree.label}</span>
+        <span
+          style={{ flex: 1, cursor: 'copy' }}
+          title={`右键复制会话 ID：${props.session.sessionId}`}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            handleCopy(props.session.sessionId, '已复制会话 ID')
+          }}
+        >
+          {tree.label}
+        </span>
         <span style={{ width: COL_BAR }} />
         <span style={{ width: COL_DUR, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtMs(tree.ms)}</span>
         <span style={{ width: COL_PCT, textAlign: 'right', color: 'var(--text-faint)' }}>100%</span>
@@ -120,6 +149,11 @@ export function TimeTree(props: {
           ganttW={ganttW}
         />
       ))}
+      {copiedTip ? (
+        <div style={copiedTipStyle} role="status">
+          ✓ {copiedTip}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -294,4 +328,21 @@ function Chevron(props: { open: boolean }): JSX.Element {
       <path d="M9 6l6 6-6 6" />
     </svg>
   )
+}
+
+/** 复制成功提示：左下角悬浮气泡，1 秒后消失 */
+const copiedTipStyle: React.CSSProperties = {
+  position: 'fixed',
+  left: 'var(--sp-3)',
+  bottom: 'var(--sp-3)',
+  padding: '6px 12px',
+  background: 'var(--accent)',
+  color: 'var(--on-accent)',
+  borderRadius: 'var(--r-sm)',
+  fontSize: 'var(--fs-sm)',
+  fontWeight: 600,
+  boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+  zIndex: 1000,
+  pointerEvents: 'none',
+  animation: 'fadeInOut 1s ease',
 }

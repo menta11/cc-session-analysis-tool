@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url'
 import { describe, it, expect } from 'vitest'
-import { scanProjects } from '../core/discovery/scan'
+import { scanProjects, readSessionMeta } from '../core/discovery/scan'
 
 const ROOT = fileURLToPath(new URL('./fixtures/scan-projects', import.meta.url))
 
@@ -29,4 +29,34 @@ describe('scanProjects', () => {
     expect(sessions.every((s) => s.sessionId.endsWith('.jsonl') === false)).toBe(true)
     expect(sessions.every((s) => s.path.endsWith('.jsonl'))).toBe(true)
   })
+
+  it('extracts first user prompt (skipping command-message wrapper)', () => {
+    const sessions = scanProjects(ROOT)
+    const s1 = sessions.find((s) => s.sessionId === 'sess-1')
+    expect(s1?.userPrompt).toBe('开始请假审批系统')
+  })
+
+  it('extracts userPrompt even without ai-title (sess-2 has user message)', () => {
+    const sessions = scanProjects(ROOT)
+    const s2 = sessions.find((s) => s.sessionId === 'sess-2')
+    expect(s2?.userPrompt).toBe('普通会话')
+  })
+
+  it('leaves userPrompt undefined when no user message has prompt text', async () => {
+    const meta = await readSessionMetaFromLines([
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hi"}]}}',
+    ])
+    expect(meta.userPrompt).toBeUndefined()
+  })
 })
+
+/** 辅助：从 JSONL 行数组构造临时文件并调 readSessionMeta */
+async function readSessionMetaFromLines(lines: string[]): Promise<{ cwd?: string | null; aiTitle?: string | null; userPrompt?: string | null }> {
+  const { writeFileSync, mkdtempSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const { tmpdir } = await import('node:os')
+  const dir = mkdtempSync(join(tmpdir(), 'scan-test-'))
+  const file = join(dir, 'tmp.jsonl')
+  writeFileSync(file, lines.join('\n'), 'utf8')
+  return readSessionMeta(file)
+}

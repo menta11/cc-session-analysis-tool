@@ -38,6 +38,16 @@ export function App(): JSX.Element {
   const [reports, setReports] = useState<Record<string, ReportState>>({})
   const cur = reports[selectedPath ?? ''] ?? EMPTY_REPORT
   const [theme, setTheme] = useState<Theme>(getInitialTheme)
+  const [copiedTip, setCopiedTip] = useState<string | null>(null)
+  const copiedTimerRef = useRef<number | null>(null)
+
+  /** 复制并显示提示气泡 1 秒 */
+  const handleCopy = (text: string, tip: string): void => {
+    void navigator.clipboard.writeText(text)
+    setCopiedTip(tip)
+    if (copiedTimerRef.current) window.clearTimeout(copiedTimerRef.current)
+    copiedTimerRef.current = window.setTimeout(() => setCopiedTip(null), 1000)
+  }
   const [sidebarW, setSidebarW] = useState(300)
   // 左侧目录栏宽度拖拽（垂直分隔条）
   const [sidebarDragging, setSidebarDragging] = useState(false)
@@ -133,7 +143,15 @@ export function App(): JSX.Element {
         </span>
         {session ? (
           <span style={metabarStyle}>
-            <span className="chip" style={chipStyle}>
+            <span
+              className="chip"
+              style={{ ...chipStyle, cursor: 'copy' }}
+              title={`右键复制会话 ID：${session.sessionId}`}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                handleCopy(session.sessionId, '已复制会话 ID')
+              }}
+            >
               <span style={{ ...dotStyle, background: 'var(--cat-compute)' }} />
               <b>{curRef?.aiTitle ?? session.sessionId.slice(0, 8)}</b>
             </span>
@@ -205,6 +223,11 @@ export function App(): JSX.Element {
           )}
         </main>
       </div>
+      {copiedTip ? (
+        <div style={copiedTipStyle} role="status">
+          ✓ {copiedTip}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -382,6 +405,23 @@ const iconBtnStyle: React.CSSProperties = {
   transition: 'background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast)',
 }
 const mainStyle: React.CSSProperties = { flex: 1, minWidth: 0 }
+
+/** 复制成功提示：左下角悬浮气泡，1 秒后消失 */
+const copiedTipStyle: React.CSSProperties = {
+  position: 'fixed',
+  left: 'var(--sp-3)',
+  bottom: 'var(--sp-3)',
+  padding: '6px 12px',
+  background: 'var(--accent)',
+  color: 'var(--on-accent)',
+  borderRadius: 'var(--r-sm)',
+  fontSize: 'var(--fs-sm)',
+  fontWeight: 600,
+  boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+  zIndex: 1000,
+  pointerEvents: 'none',
+  animation: 'fadeInOut 1s ease',
+}
 
 const emptyStyle: React.CSSProperties = {
   height: '100%',

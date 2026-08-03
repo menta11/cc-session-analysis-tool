@@ -108,11 +108,11 @@ export function SessionList(props: {
                   {groupTitle(proj, sess)}
                 </span>
                 <span
-                  onClick={(e) => {
-                    e.stopPropagation()
+                  onContextMenu={(e) => {
+                    e.preventDefault()
                     handleCopy(groupSub(proj, sess), '已复制完整路径')
                   }}
-                  title="点击复制完整路径"
+                  title="右键复制完整路径"
                   style={{
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
@@ -169,14 +169,14 @@ function Row(props: {
       }}
     >
       <div
-        onClick={(e) => {
-          e.stopPropagation()
+        onContextMenu={(e) => {
+          e.preventDefault()
           props.onCopy(props.s.sessionId, '已复制会话 ID')
         }}
-        title={`点击复制会话 ID：${props.s.sessionId}`}
+        title={`右键复制会话 ID：${props.s.sessionId}`}
         style={{ fontWeight: 600, fontSize: 'var(--fs-base)', fontFamily: 'var(--font-mono)', cursor: 'copy' }}
       >
-        {props.s.aiTitle ?? `${props.s.sessionId.slice(0, 12)}…`}
+        {sessionTitle(props.s)}
       </div>
       <div style={{ display: 'flex', gap: 8, marginTop: 1, color: 'var(--text-faint)', fontSize: 'var(--fs-xs)' }}>
         <span>{fmtRelative(props.s.mtimeMs)}</span>
@@ -203,6 +203,13 @@ function groupSub(proj: string, sess: SessionRef[]): string {
 function basename(p: string): string {
   const parts = p.replace(/[\\/]+$/, '').split(/[\\/]/)
   return parts[parts.length - 1] || p
+}
+
+/** 会话标题三级降级：aiTitle → 首条 user prompt（截断 40 字）→ sessionId 前 12 位 */
+function sessionTitle(s: SessionRef): string {
+  if (s.aiTitle) return s.aiTitle
+  if (s.userPrompt) return s.userPrompt.length > 40 ? `${s.userPrompt.slice(0, 40)}…` : s.userPrompt
+  return `${s.sessionId.slice(0, 12)}…`
 }
 
 /** 复制成功提示：左下角悬浮气泡，1 秒后消失 */
