@@ -88,8 +88,10 @@ export function App(): JSX.Element {
     const key = selectedPath
     setReports((r) => ({ ...r, [key]: { ...EMPTY_REPORT, loading: true } }))
     let acc = ''
+    // 只接收本会话（key）的 chunk，避免并发分析时串线
     const off = window.api.onAnalyzeChunk((chunk) => {
-      acc += chunk
+      if (chunk.sessionPath !== key) return
+      acc += chunk.text
       setReports((r) => ({ ...r, [key]: { ...(r[key] ?? EMPTY_REPORT), text: acc, loading: true } }))
     })
     try {

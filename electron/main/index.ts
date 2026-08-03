@@ -110,8 +110,9 @@ app.whenReady().then(() => {
       return { ok: false, text: '', error: '组装提示词失败：' + (err instanceof Error ? err.message : String(err)) }
     }
     const win = BrowserWindow.fromWebContents(e.sender)
+    // chunk 携带 sessionPath，渲染端并发分析时只接收本会话的流式内容
     return runClaudeStream(userMessage, systemPrompt, (chunk) => {
-      win?.webContents.send('analyze:chunk', chunk)
+      win?.webContents.send('analyze:chunk', { sessionPath: args.sessionPath, text: chunk })
     }, { timeoutMs: 600_000 })
   })
 

@@ -5,8 +5,8 @@ contextBridge.exposeInMainWorld('api', {
   loadSession: (path: string) => ipcRenderer.invoke('session:load', path),
   analyzeReport: (kind: 'whole' | 'node', sessionPath: string, focusToolUseId?: string) =>
     ipcRenderer.invoke('analyze:run', { kind, sessionPath, focusToolUseId }),
-  onAnalyzeChunk: (cb: (text: string) => void) => {
-    const listener = (_e: unknown, text: string) => cb(text)
+  onAnalyzeChunk: (cb: (chunk: { sessionPath: string; text: string }) => void) => {
+    const listener = (_e: unknown, chunk: { sessionPath: string; text: string }) => cb(chunk)
     ipcRenderer.on('analyze:chunk', listener)
     return () => {
       ipcRenderer.removeListener('analyze:chunk', listener)
