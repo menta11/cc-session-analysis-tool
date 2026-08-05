@@ -6,6 +6,12 @@ directories:
 # 国内网络镜像（GitHub 下载超时）：electron 二进制 + electron-builder 工具链走 npmmirror
 electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/
+# 砍掉非中英文语言包（electron 二进制内的 .lproj 本地化资源，减肥）
+electronLanguages:
+  - en
+  - zh-CN
+# 打包后钩子：mac 平台对 .app 做 ad-hoc 自签（dmg 生成前注入，dmg 内即已签名）
+afterPack: ./build/sign-mac.js
 files:
   - 'out/**/*'
   - 'package.json'
@@ -36,5 +42,10 @@ portable:
 mac:
   target:
     - dmg
-    - zip
   category: public.app-category.developer-tools
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Development
+  icon: build/icon.png

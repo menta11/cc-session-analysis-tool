@@ -1,12 +1,18 @@
-# 项目命令入口。用法：`just <recipe>`，例如 `just check`。输入 `just` 查看帮助列表。
-# Windows 下 just 默认用 sh，但 PowerShell/cmd 环境没有 sh → 用 cmd.exe；
-# macOS/Linux 用默认 sh 即可。
+# 项目命令入口。用法：`just <recipe>`，例如 `just ci`。输入 `just` 查看帮助列表。
+# 跨平台兼容 (Win/macOS/Linux)：环境变量统一用 just 的 export 注入子进程，
+# 不依赖任何 shell 语法 (sh/bash/zsh/cmd/powershell 均可执行)。
 
+# Windows 用 cmd.exe（PowerShell/cmd 无 sh）；macOS/Linux 用默认 sh（显式声明）
 [windows]
 set shell := ["cmd", "/C"]
 
-# 无参数运行 just 时显示帮助列表
-[default]
+[unix]
+set shell := ["sh", "-cu"]
+
+# electron-builder 打包工具链镜像（国内加速 GitHub 下载；仅 dist-* 命令消费，其他 recipe 无副作用）
+export ELECTRON_BUILDER_BINARIES_MIRROR := "https://npmmirror.com/mirrors/electron-builder-binaries/"
+
+# 无参数运行 just 时显示帮助列表 (recipe 名 default 即为默认动作)
 default:
     @just --list
 
@@ -22,19 +28,37 @@ dev:
 build:
     npm run build
 
+# 构建 Windows 安装包 (NSIS + portable) -> dist/
+# npm script 自带 build，just 不重复依赖（避免构建两次）
+dist-win:
+    npm run dist:win
+
+# 构建 macOS dmg (压缩 ~95M，自带拖拽安装界面) + ad-hoc 自签 (afterPack 自动注入)
+# 产物: dist/Claude会话耗时分析-<version>-arm64.dmg
+# 分发: 对方双击 dmg → 拖入 Applications → 首次右键→打开→确认 (ad-hoc 签名限制)
+dist-mac:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    npm run dist:mac
+    DMG=$(ls dist/*.dmg 2>/dev/null | head -1)
+    if [ -z "$DMG" ]; then
+        echo "❌ 未找到 dmg 产物"
+        exit 1
+    fi
+    echo "✅ 完成: $DMG ($(du -h "$DMG" | cut -f1))"
+    echo "→ 分发: 对方双击 dmg → 拖入 Applications → 首次右键→打开→确认"
+
+# 构建 Linux 安装包 (AppImage + deb) -> dist/
+dist-linux:
+    npm run dist:linux
+
+# 清理打包产物
+clean:
+    rm -rf dist
+
 # 预览构建产物
 preview:
     npm run preview
-
-# 构建 Windows 安装包 (NSIS + portable) -> dist/
-# 设置工具链镜像（国内网络 GitHub 超时）
-dist-win: build
-    set ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/
-    npm run dist:win
-
-# 构建 macOS 安装包 (dmg + zip) -> dist/
-dist-mac: build
-    npm run dist:mac
 
 # 类型检查 (node + web 两套 tsconfig)
 typecheck:
