@@ -117,11 +117,15 @@ export function clipTreeToWindow(tree: TreeNode, viewStart: number, viewEnd: num
     const segs = clipSegs(n.segments)
     // 根节点无 segments，ms 语义 = 窗口总时长；其余节点 = 裁剪后段并集
     const ms = n.kind === 'root' ? viewEnd - viewStart : segs ? unionDuration(segs) : 0
+    const hasSegs = !!n.segments
+    // count 重算为窗口内段数（节点原本有 segments 才重算，裁剪后为空则 0）；calls 保留完整
+    const count = hasSegs && n.count != null ? (segs ? segs.length : 0) : n.count
     return {
       ...n,
       ms,
       wallMs: viewEnd - viewStart,
       segments: segs,
+      count,
       children: n.children ? n.children.map(clip) : undefined,
       // calls 保留完整（详情面板）
     }
