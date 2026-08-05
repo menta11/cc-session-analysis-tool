@@ -38,8 +38,15 @@ export function App(): JSX.Element {
   const [reports, setReports] = useState<Record<string, ReportState>>({})
   const cur = reports[selectedPath ?? ''] ?? EMPTY_REPORT
   const [theme, setTheme] = useState<Theme>(getInitialTheme)
+  const [sidebarW, setSidebarW] = useState(300)
   const [copiedTip, setCopiedTip] = useState<string | null>(null)
   const copiedTimerRef = useRef<number | null>(null)
+  // 甘特图视图窗口（默认全会话范围，会话加载后设置）
+  const [viewWindow, setViewWindow] = useState<{ start: number; end: number } | null>(null)
+  // AI 分析范围：整会话 或 按当前窗口
+  const [aiScope, setAiScope] = useState<'whole' | 'window'>('whole')
+  // 生成报告时的窗口（用于「窗口已变化」提示）
+  const [reportWindow, setReportWindow] = useState<{ start: number; end: number } | null>(null)
 
   /** 复制并显示提示气泡 1 秒 */
   const handleCopy = (text: string, tip: string): void => {
@@ -48,7 +55,76 @@ export function App(): JSX.Element {
     if (copiedTimerRef.current) window.clearTimeout(copiedTimerRef.current)
     copiedTimerRef.current = window.setTimeout(() => setCopiedTip(null), 1000)
   }
-  const [sidebarW, setSidebarW] = useState(300)
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    try {
+      localStorage.setItem('ccsa-theme', theme)
+    } catch {
+      /* 忽略隐私模式等写入失败 */
+    }
+  }, [theme])
+
+  useEffect(() => {
+    void window.api.scanProjects().then(setSessions)
+  }, [])
+
+  // 文件菜单「导入会话」：主进程打开对话框后把路径推过来
+  useEffect(() => window.api.onImportSession((path) => load(path)), [])
+
+  const load = (path: string): void => {
+    setSelectedPath(path)
+    setSelected(null)
+    void window.api.loadSession(path).then((s) => {
+      setSession(s)
+      if (s.startedAt != null && s.endedAt != null) {
+        setViewWindow({ start: s.startedAt, end: s.endedAt })
+      }
+    })
+  }
+
+  const analyze = async (kind: 'whole' | 'node', focusToolUseId?: string): Promise<void> => {
+    if (!selectedPath) return
+    const key = selectedPath
+    // 按窗口分析时传当前窗口；整会话模式不传
+    const win = aiScope === 'window' && viewWindow ? viewWindow : undefined
+    setReports((r) => ({ ...r, [key]: { ...EMPTY_REPORT, loading: true } }))
+    let acc = ''
+    // 只接收本会话（key）的 chunk，避免并发分析时串线
+    const off = window.api.onAnalyzeChunk((chunk) => {
+      if (chunk.sessionPath !== key) return
+      acc += chunk.text
+      setReports((r) => ({ ...r, [key]: { ...(r[key] ?? EMPTY_REPORT), text: acc, loading: true } }))
+    })
+    try {
+      const res = await window.api.analyzeReport(kind, selectedPath, focusToolUseId, win)
+      if (res.ok) {
+        setReports((r) => ({ ...r, [key]: { text: res.text || acc, error: '', claudeId: res.sessionId, loading: false } }))
+        setReportWindow(win ?? null)
+      } else {
+        setReports((r) => ({ ...r, [key]: { text: '', error: res.error ?? '分析失败', claudeId: undefined, loading: false } }))
+      }
+    } finally {
+      off()
+    }
+  }
+
+  // 窗口模式且窗口已偏离生成报告时的窗口 → 提示重新生成
+  const windowChanged = !!reportWindow && !!viewWindow && (reportWindow.start !== viewWindow.start || reportWindow.end !== viewWindow.end)
+
+  const analyzeWhole = (): void => {
+    void analyze('whole')
+  }
+
+  const analyzeAgent = (toolUseId: string): void => {
+    void analyze('node', toolUseId)
+  }
+
+  const save = async (): Promise<void> => {
+    if (!cur.text) return
+    await window.api.saveReport(cur.text, `会话分析报告-${session?.sessionId.slice(0, 8) ?? 'session'}.md`)
+  }
+
   // 左侧目录栏宽度拖拽（垂直分隔条）
   const [sidebarDragging, setSidebarDragging] = useState(false)
   const sidebarDragRef = useRef(false)
@@ -70,64 +146,6 @@ export function App(): JSX.Element {
     window.addEventListener('mousemove', mm)
     window.addEventListener('mouseup', up)
   }, [])
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme
-    try {
-      localStorage.setItem('ccsa-theme', theme)
-    } catch {
-      /* 忽略隐私模式等写入失败 */
-    }
-  }, [theme])
-
-  useEffect(() => {
-    void window.api.scanProjects().then(setSessions)
-  }, [])
-
-  // 文件菜单「导入会话」：主进程打开对话框后把路径推过来
-  useEffect(() => window.api.onImportSession((path) => load(path)), [])
-
-  const load = (path: string): void => {
-    setSelectedPath(path)
-    setSelected(null)
-    void window.api.loadSession(path).then(setSession)
-  }
-
-  const analyze = async (kind: 'whole' | 'node', focusToolUseId?: string): Promise<void> => {
-    if (!selectedPath) return
-    const key = selectedPath
-    setReports((r) => ({ ...r, [key]: { ...EMPTY_REPORT, loading: true } }))
-    let acc = ''
-    // 只接收本会话（key）的 chunk，避免并发分析时串线
-    const off = window.api.onAnalyzeChunk((chunk) => {
-      if (chunk.sessionPath !== key) return
-      acc += chunk.text
-      setReports((r) => ({ ...r, [key]: { ...(r[key] ?? EMPTY_REPORT), text: acc, loading: true } }))
-    })
-    try {
-      const res = await window.api.analyzeReport(kind, selectedPath, focusToolUseId)
-      if (res.ok) {
-        setReports((r) => ({ ...r, [key]: { text: res.text || acc, error: '', claudeId: res.sessionId, loading: false } }))
-      } else {
-        setReports((r) => ({ ...r, [key]: { text: '', error: res.error ?? '分析失败', claudeId: undefined, loading: false } }))
-      }
-    } finally {
-      off()
-    }
-  }
-
-  const analyzeWhole = (): void => {
-    void analyze('whole')
-  }
-
-  const analyzeAgent = (toolUseId: string): void => {
-    void analyze('node', toolUseId)
-  }
-
-  const save = async (): Promise<void> => {
-    if (!cur.text) return
-    await window.api.saveReport(cur.text, `会话分析报告-${session?.sessionId.slice(0, 8) ?? 'session'}.md`)
-  }
 
   // 当前选中会话的 ref（取 mtime / size）
   const curRef = sessions.find((s) => s.path === selectedPath)
@@ -198,24 +216,53 @@ export function App(): JSX.Element {
                   initialRatio={0.62}
                   top={
                     <div style={{ height: '100%', overflow: 'auto', minHeight: 0 }}>
-                      <TimeTree session={session} onSelect={setSelected} selectedId={selected?.id} />
+                      <TimeTree
+                        session={session}
+                        onSelect={setSelected}
+                        selectedId={selected?.id}
+                        viewWindow={viewWindow}
+                        onWindowChange={setViewWindow}
+                      />
                     </div>
                   }
                   bottom={<DetailPanel node={selected} onAnalyzeAgent={analyzeAgent} />}
                 />
               }
               bottom={
-                <AiReport
-                  text={cur.text}
-                  loading={cur.loading}
-                  error={cur.error}
-                  sessionId={cur.claudeId}
-                  onGenerate={analyzeWhole}
-                  onSave={save}
-                  onOpenTerminal={() => {
-                    if (cur.claudeId) void window.api.openTerminal(cur.claudeId)
-                  }}
-                />
+                <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', padding: 'var(--sp-1) var(--sp-3)', borderBottom: '1px solid var(--border)', background: 'var(--bg-subtle)' }}>
+                    <label className="chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={aiScope === 'window'}
+                        onChange={(e) => setAiScope(e.target.checked ? 'window' : 'whole')}
+                        style={{ cursor: 'pointer' }}
+                      />
+                      仅分析所选时间块
+                    </label>
+                    {aiScope === 'window' && cur.claudeId && windowChanged ? (
+                      <span style={{ color: 'var(--accent)', fontSize: 'var(--fs-xs)' }} title="窗口已变化，建议重新生成分析报告">
+                        ⚠ 窗口已变化，建议重新生成
+                      </span>
+                    ) : null}
+                    {aiScope === 'whole' && cur.claudeId ? (
+                      <span style={{ color: 'var(--text-faint)', fontSize: 'var(--fs-xs)' }}>整会话分析</span>
+                    ) : null}
+                  </div>
+                  <div style={{ flex: 1, minHeight: 0 }}>
+                    <AiReport
+                      text={cur.text}
+                      loading={cur.loading}
+                      error={cur.error}
+                      sessionId={cur.claudeId}
+                      onGenerate={analyzeWhole}
+                      onSave={save}
+                      onOpenTerminal={() => {
+                        if (cur.claudeId) void window.api.openTerminal(cur.claudeId)
+                      }}
+                    />
+                  </div>
+                </div>
               }
             />
           ) : (
@@ -378,6 +425,8 @@ const sidebarSplitterStyle: React.CSSProperties = {
   background: 'var(--border)',
   transition: 'background var(--transition-fast)',
 }
+
+// 拖拽时高亮分隔条（复用 .splitter-v.is-dragging 类，CSS 里定义）
 
 const sidebarHeaderStyle: React.CSSProperties = {
   padding: '8px 12px',

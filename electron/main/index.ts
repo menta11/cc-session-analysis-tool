@@ -89,7 +89,7 @@ app.whenReady().then(() => {
     return session
   })
 
-  ipcMain.handle('analyze:run', async (e, args: { kind: 'whole' | 'node'; sessionPath: string; focusToolUseId?: string }) => {
+  ipcMain.handle('analyze:run', async (e, args: { kind: 'whole' | 'node'; sessionPath: string; focusToolUseId?: string; window?: { start: number; end: number } }) => {
     const cached = sessionCache.get(args.sessionPath)
     if (!cached) {
       return { ok: false, text: '', error: '会话未加载，请重新选择会话' }
@@ -103,6 +103,7 @@ app.whenReady().then(() => {
         mainFilePath: cached.mainFilePath,
         agentIndex: cached.agentIndex,
         focusToolUseId: args.focusToolUseId,
+        window: args.window,
       })
       systemPrompt = r.systemPrompt
       userMessage = r.userMessage

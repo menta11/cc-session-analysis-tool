@@ -10,6 +10,7 @@ declare global {
         kind: 'whole' | 'node',
         sessionPath: string,
         focusToolUseId?: string,
+        window?: { start: number; end: number },
       ) => Promise<{ ok: boolean; text: string; error?: string; sessionId?: string; costUsd?: number; durationMs?: number; numTurns?: number }>
       onAnalyzeChunk: (cb: (chunk: { sessionPath: string; text: string }) => void) => () => void
       saveReport: (text: string, name: string) => Promise<string | null>
