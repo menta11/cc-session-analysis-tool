@@ -1,6 +1,6 @@
 import type { NodeTime, Session, Turn } from '../parser/types'
 import { classifyTool } from './classify'
-import { unionDuration, type Interval } from './timeline'
+import { clipInterval, unionDuration, type Interval } from './timeline'
 
 export interface CategoryIntervals {
   waitUser: Interval[] // AskUserQuestion + 轮间间隙
@@ -18,31 +18,46 @@ export function sessionIntervals(session: Session): CategoryIntervals {
   const direct: Interval[] = []
   const delegated: Interval[] = []
   const askUser: Interval[] = []
+  const start = session.startedAt
+  const end = session.endedAt
+  // 把区间裁剪到会话范围（窗口）：窗口裁剪后 start/end 是窗口边界，
+  // 横跨窗口边界的调用/等待只保留窗口内部分（避免窗口模式虚高）
+  const inScope = (iv: Interval): Interval | null =>
+    start != null && end != null ? clipInterval(iv, start, end) : iv
   for (const turn of session.turns) {
     for (const tc of turn.toolCalls) {
       const kind = classifyTool(tc.name)
       if (kind === 'delegated') {
         // 用子 agent 实际总耗时（异步后台 agent 的真实运行时长）；无 child 退回父侧调度区间
         const child = tc.childSession
-        if (child && child.startedAt != null && child.endedAt != null) {
-          delegated.push({ start: child.startedAt, end: child.endedAt })
-        } else if (tc.tsEnd != null) {
-          delegated.push({ start: tc.tsStart, end: tc.tsEnd })
+        const iv = child && child.startedAt != null && child.endedAt != null
+          ? { start: child.startedAt, end: child.endedAt }
+          : tc.tsEnd != null
+            ? { start: tc.tsStart, end: tc.tsEnd }
+            : null
+        if (iv) {
+          const c = inScope(iv)
+          if (c) delegated.push(c)
         }
       } else if (tc.tsEnd != null) {
         const iv: Interval = { start: tc.tsStart, end: tc.tsEnd }
-        if (kind === 'direct') direct.push(iv)
-        else if (kind === 'wait-user') askUser.push(iv)
+        const c = inScope(iv)
+        if (c) {
+          if (kind === 'direct') direct.push(c)
+          else if (kind === 'wait-user') askUser.push(c)
+        }
       }
     }
   }
   // 方案A：总耗时一维，每一秒只归一类。等用户让出与"本地工具(含后台 agent)"重叠的部分
   // （人离开但后台 agent 在跑 → 算委派，不算空闲）→ 等用户 = 真空闲，sum 严格 = 总耗时。
   const activity = [...direct, ...delegated]
-  const rawWait = session.isSubagent ? askUser : [...askUser, ...interTurnGaps(session)]
+  // 轮间间隙裁剪到会话范围（窗口）
+  const gaps = interTurnGaps(session)
+    .map((iv) => inScope(iv))
+    .filter((iv): iv is Interval => iv !== null)
+  const rawWait = session.isSubagent ? askUser : [...askUser, ...gaps]
   const waitUser = rawWait.flatMap((iv) => complement(activity, iv.start, iv.end))
-  const start = session.startedAt
-  const end = session.endedAt
   const compute = start != null && end != null ? complement([...waitUser, ...activity], start, end) : []
   return { waitUser, direct, delegated, compute }
 }
