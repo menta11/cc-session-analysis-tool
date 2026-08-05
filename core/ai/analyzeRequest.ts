@@ -2,6 +2,8 @@ import type { Session, ToolCall } from '../parser/types'
 import { breakdownOf } from '../model/timeBreakdown'
 import { buildDigest, buildFileMap, type FileMeta } from './prompt'
 import { getSystemPrompt } from './template'
+import { clipSessionToWindow } from './sessionWindow'
+import type { ViewWindow } from '../view/window'
 
 export interface AnalyzeRequestOpts {
   kind: 'whole' | 'node'
@@ -13,6 +15,8 @@ export interface AnalyzeRequestOpts {
   focusToolUseId?: string
   /** 可选：由调用方注入的文件元信息（行数/体积）。 */
   fileMeta?: (absPath: string) => FileMeta | null
+  /** 可选：按时间窗口分析（视图窗口 [start,end]）。存在时基于窗口内完整 turns 构建 digest。 */
+  window?: ViewWindow
 }
 
 export interface AnalyzeRequest {
@@ -66,8 +70,10 @@ export function buildAnalyzeRequest(session: Session, opts: AnalyzeRequestOpts):
       fileMeta: opts.fileMeta,
     })
   } else {
-    digest = buildDigest(session)
-    fileMap = buildFileMap(session, {
+    // 按窗口分析：基于窗口内完整 turns 的 session 视图构建 digest/fileMap
+    const scoped = opts.window ? clipSessionToWindow(session, opts.window.start, opts.window.end) : session
+    digest = buildDigest(scoped)
+    fileMap = buildFileMap(scoped, {
       projectsRoot: opts.projectsRoot,
       mainFilePath: opts.mainFilePath,
       agentIndex: opts.agentIndex,

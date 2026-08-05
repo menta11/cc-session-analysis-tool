@@ -3,6 +3,15 @@ export interface Interval {
   end: number
 }
 
+/** 区间裁剪到 [lo, hi]，无交集返回 null。 */
+export function clipInterval(iv: Interval, lo: number, hi: number): Interval | null {
+  if (iv.end <= iv.start || hi <= lo) return null
+  const start = Math.max(iv.start, lo)
+  const end = Math.min(iv.end, hi)
+  if (end <= start) return null
+  return { start, end }
+}
+
 /**
  * 时间线合并：对区间集合取并集，返回总覆盖时长（ms）。
  * 关键作用：并行子 agent 的调度区间重叠时，取并集而非求和，避免"并行虚高"。

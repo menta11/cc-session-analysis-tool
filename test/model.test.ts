@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { classifyTool } from '../core/model/classify'
-import { unionDuration } from '../core/model/timeline'
+import { clipInterval, unionDuration } from '../core/model/timeline'
 
 describe('classifyTool', () => {
   it.each([
@@ -42,5 +42,32 @@ describe('unionDuration', () => {
 
   it('ignores invalid intervals (end <= start)', () => {
     expect(unionDuration([{ start: 10, end: 10 }, { start: 20, end: 5 }, { start: 0, end: 10 }])).toBe(10)
+  })
+})
+
+describe('clipInterval', () => {
+  it('keeps fully-inside interval unchanged', () => {
+    expect(clipInterval({ start: 100, end: 500 }, 0, 1000)).toEqual({ start: 100, end: 500 })
+  })
+
+  it('trims left overflow', () => {
+    expect(clipInterval({ start: 0, end: 500 }, 100, 1000)).toEqual({ start: 100, end: 500 })
+  })
+
+  it('trims right overflow', () => {
+    expect(clipInterval({ start: 600, end: 2000 }, 100, 1000)).toEqual({ start: 600, end: 1000 })
+  })
+
+  it('trims both sides', () => {
+    expect(clipInterval({ start: 0, end: 2000 }, 100, 1000)).toEqual({ start: 100, end: 1000 })
+  })
+
+  it('returns null when no overlap', () => {
+    expect(clipInterval({ start: 2000, end: 3000 }, 0, 1000)).toBeNull()
+    expect(clipInterval({ start: 0, end: 100 }, 500, 1000)).toBeNull()
+  })
+
+  it('returns null for invalid interval', () => {
+    expect(clipInterval({ start: 500, end: 500 }, 0, 1000)).toBeNull()
   })
 })

@@ -1,6 +1,7 @@
 import type { Session, ToolCall } from '../parser/types'
 import { breakdownOf, sessionIntervals, type CategoryIntervals } from '../model/timeBreakdown'
 import { classifyTool } from '../model/classify'
+import { clipInterval, unionDuration } from '../model/timeline'
 
 /** 类别配色（Okabe-Ito 色盲友好，引用 CSS 变量以便随明/暗主题切换）。 */
 export const CATEGORY_COLORS = {
@@ -92,6 +93,41 @@ export function buildTreeNode(session: Session): TreeNode {
       },
     ],
   }
+}
+
+/**
+ * 把树裁剪到视图窗口 [viewStart, viewEnd]：
+ *  - 节点 segments 裁剪到窗口（clipInterval），ms = 裁剪后各段并集时长
+ *  - 节点 wallMs = 窗口时长（统一基准，占比/横条用）
+ *  - calls（toolBucket 详情）保留完整（不裁剪）
+ * 返回新树，不改原树。纯函数，可单测。
+ */
+export function clipTreeToWindow(tree: TreeNode, viewStart: number, viewEnd: number): TreeNode {
+  const clipSegs = (segs: Segment[] | undefined): Segment[] | undefined => {
+    if (!segs) return undefined
+    const clipped: Segment[] = []
+    for (const s of segs) {
+      const c = clipInterval(s, viewStart, viewEnd)
+      if (c) clipped.push({ ...c, color: s.color })
+    }
+    return clipped.length > 0 ? clipped : undefined
+  }
+
+  const clip = (n: TreeNode): TreeNode => {
+    const segs = clipSegs(n.segments)
+    // 根节点无 segments，ms 语义 = 窗口总时长；其余节点 = 裁剪后段并集
+    const ms = n.kind === 'root' ? viewEnd - viewStart : segs ? unionDuration(segs) : 0
+    return {
+      ...n,
+      ms,
+      wallMs: viewEnd - viewStart,
+      segments: segs,
+      children: n.children ? n.children.map(clip) : undefined,
+      // calls 保留完整（详情面板）
+    }
+  }
+
+  return clip(tree)
 }
 
 function buildLocalToolNode(session: Session, b: ReturnType<typeof breakdownOf>, ci: CategoryIntervals, wall: number): TreeNode {

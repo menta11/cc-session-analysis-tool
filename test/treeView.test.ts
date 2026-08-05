@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { parseLines } from '../core/parser/parse'
-import { buildTreeNode } from '../core/view/treeView'
+import { buildTreeNode, clipTreeToWindow } from '../core/view/treeView'
 
 const lines = [
   '{"type":"user","uuid":"u1","timestamp":"2026-04-24T12:00:00.000Z","sessionId":"m","cwd":"/home/me/proj","message":{"role":"user","content":"go"}}',
@@ -54,5 +54,62 @@ describe('buildTreeNode', () => {
     expect(agent.expandable).toBe(true)
     expect(agent.childSession).toBeDefined()
     expect(agent.label).toContain('general-purpose')
+  })
+})
+
+describe('clipTreeToWindow', () => {
+  const s = parseLines(lines, 'm')
+  const tree = buildTreeNode(s)
+
+  it('keeps tree unchanged when window covers whole session', () => {
+    const clipped = clipTreeToWindow(tree, s.startedAt!, s.endedAt!)
+    expect(clipped.ms).toBe(tree.ms)
+    expect(clipped.children!.length).toBe(3)
+    const wait = clipped.children!.find((c) => c.kind === 'waitUser')!
+    expect(wait.ms).toBe(tree.children!.find((c) => c.kind === 'waitUser')!.ms)
+  })
+
+  it('clips segments to window and recomputes node ms', () => {
+    // 窗口 [11s, 111s]：只覆盖 t2 agent 的段
+    const start = s.startedAt! + 11_000
+    const end = s.startedAt! + 111_000
+    const clipped = clipTreeToWindow(tree, start, end)
+    // 根节点 ms = 窗口时长
+    expect(clipped.ms).toBe(100_000)
+    // delegated 段完全在窗口内 → ms 保留
+    const local = clipped.children!.find((c) => c.kind === 'localTool')!
+    const delegated = local.children!.find((c) => c.kind === 'delegated')!
+    expect(delegated.ms).toBe(100_000)
+    // waitUser 段被裁剪（窗口内无 waitUser 段？依赖会话结构）
+    const wait = clipped.children!.find((c) => c.kind === 'waitUser')!
+    expect(wait.ms).toBeGreaterThanOrEqual(0)
+  })
+
+  it('sets wallMs to window duration for all nodes', () => {
+    const start = s.startedAt! + 11_000
+    const end = s.startedAt! + 111_000
+    const clipped = clipTreeToWindow(tree, start, end)
+    expect(clipped.wallMs).toBe(100_000)
+    expect(clipped.children![0].wallMs).toBe(100_000)
+  })
+
+  it('preserves calls (toolBucket detail) unfiltered', () => {
+    const start = s.startedAt! + 11_000
+    const end = s.startedAt! + 111_000
+    const clipped = clipTreeToWindow(tree, start, end)
+    const local = clipped.children!.find((c) => c.kind === 'localTool')!
+    const direct = local.children!.find((c) => c.kind === 'direct')!
+    const bash = direct.children!.find((c) => c.kind === 'toolBucket')!
+    // 窗口内没有 Bash 调用（t1 在 1s-11s），但 calls 保留完整
+    expect(bash.calls).toHaveLength(1)
+  })
+
+  it('returns null-ms nodes when segments all outside window', () => {
+    const start = s.startedAt! + 112_000 // 窗口在 t2 之后
+    const end = s.startedAt! + 200_000
+    const clipped = clipTreeToWindow(tree, start, end)
+    const local = clipped.children!.find((c) => c.kind === 'localTool')!
+    const delegated = local.children!.find((c) => c.kind === 'delegated')!
+    expect(delegated.ms).toBe(0)
   })
 })

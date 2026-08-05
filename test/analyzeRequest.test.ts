@@ -64,3 +64,29 @@ describe('buildAnalyzeRequest — node 错误路径', () => {
     ).toThrow()
   })
 })
+
+describe('buildAnalyzeRequest — window 模式', () => {
+  it('window 存在时基于窗口内 turns 构建 digest（只含窗口内轮次）', () => {
+    const r = buildAnalyzeRequest(session, {
+      kind: 'whole',
+      projectsRoot: '/fake/root',
+      mainFilePath: '/fake/root/main.jsonl',
+      agentIndex,
+      window: { start: session.startedAt!, end: session.startedAt! + 5000 },
+    })
+    const digest = r.userMessage.split('# 文件地图')[0]
+    // 窗口只覆盖第一个 turn（t1 Bash，agent t2 在 4s-34s 不在窗口内）
+    expect(digest).toContain('轮次 1')
+    expect(digest).toContain('总耗时 5s')
+  })
+
+  it('无 window 时行为不变（整会话）', () => {
+    const r = buildAnalyzeRequest(session, {
+      kind: 'whole',
+      projectsRoot: '/fake/root',
+      mainFilePath: '/fake/root/main.jsonl',
+      agentIndex,
+    })
+    expect(r.userMessage).toContain('subagents/agent-c.jsonl')
+  })
+})
