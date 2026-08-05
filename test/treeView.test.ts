@@ -93,15 +93,15 @@ describe('clipTreeToWindow', () => {
     expect(clipped.children![0].wallMs).toBe(100_000)
   })
 
-  it('preserves calls (toolBucket detail) unfiltered', () => {
+  it('clips calls to window (tsStart within window)', () => {
     const start = s.startedAt! + 11_000
     const end = s.startedAt! + 111_000
     const clipped = clipTreeToWindow(tree, start, end)
     const local = clipped.children!.find((c) => c.kind === 'localTool')!
     const direct = local.children!.find((c) => c.kind === 'direct')!
     const bash = direct.children!.find((c) => c.kind === 'toolBucket')!
-    // 窗口内没有 Bash 调用（t1 在 1s-11s），但 calls 保留完整
-    expect(bash.calls).toHaveLength(1)
+    // 窗口 [11s,111s]：t1 Bash 在 1s-11s（tsStart 不在窗口内）→ calls 裁剪为空
+    expect(bash.calls).toHaveLength(0)
   })
 
   it('returns null-ms nodes when segments all outside window', () => {
@@ -113,7 +113,7 @@ describe('clipTreeToWindow', () => {
     expect(delegated.ms).toBe(0)
   })
 
-  it('recomputes count to windowed segment count (calls kept full)', () => {
+  it('recomputes count to windowed segment count', () => {
     // 窗口 [11s, 111s]：只覆盖 t2 agent 段，不覆盖 t1 Bash 段
     const start = s.startedAt! + 11_000
     const end = s.startedAt! + 111_000
@@ -121,9 +121,8 @@ describe('clipTreeToWindow', () => {
     const local = clipped.children!.find((c) => c.kind === 'localTool')!
     const direct = local.children!.find((c) => c.kind === 'direct')!
     const bash = direct.children!.find((c) => c.kind === 'toolBucket')!
-    // Bash 段（1s-11s）在窗口外 → count 重算为 0，但 calls 保留完整
+    // Bash 段（1s-11s）在窗口外 → count 重算为 0
     expect(bash.count).toBe(0)
-    expect(bash.calls).toHaveLength(1)
     // delegated agent 段（11s-111s）在窗口内 → count 保持
     const delegated = local.children!.find((c) => c.kind === 'delegated')!
     expect(delegated.count).toBe(1)

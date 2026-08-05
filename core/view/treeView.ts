@@ -99,7 +99,7 @@ export function buildTreeNode(session: Session): TreeNode {
  * 把树裁剪到视图窗口 [viewStart, viewEnd]：
  *  - 节点 segments 裁剪到窗口（clipInterval），ms = 裁剪后各段并集时长
  *  - 节点 wallMs = 窗口时长（统一基准，占比/横条用）
- *  - calls（toolBucket 详情）保留完整（不裁剪）
+ *  - calls（toolBucket 详情）按窗口裁剪：只保留 tsStart 落在窗口内的调用
  * 返回新树，不改原树。纯函数，可单测。
  */
 export function clipTreeToWindow(tree: TreeNode, viewStart: number, viewEnd: number): TreeNode {
@@ -114,20 +114,22 @@ export function clipTreeToWindow(tree: TreeNode, viewStart: number, viewEnd: num
   }
 
   const clip = (n: TreeNode): TreeNode => {
+    const hasSegs = !!n.segments
     const segs = clipSegs(n.segments)
     // 根节点无 segments，ms 语义 = 窗口总时长；其余节点 = 裁剪后段并集
     const ms = n.kind === 'root' ? viewEnd - viewStart : segs ? unionDuration(segs) : 0
-    const hasSegs = !!n.segments
-    // count 重算为窗口内段数（节点原本有 segments 才重算，裁剪后为空则 0）；calls 保留完整
+    // count 重算为窗口内段数（节点原本有 segments 才重算，裁剪后为空则 0）
     const count = hasSegs && n.count != null ? (segs ? segs.length : 0) : n.count
+    // calls 按窗口裁剪：tsStart 落在窗口内才保留（详情面板与统计一致）
+    const calls = n.calls ? n.calls.filter((tc) => tc.tsStart >= viewStart && tc.tsStart <= viewEnd) : undefined
     return {
       ...n,
       ms,
       wallMs: viewEnd - viewStart,
-      segments: segs,
       count,
+      segments: segs,
+      calls,
       children: n.children ? n.children.map(clip) : undefined,
-      // calls 保留完整（详情面板）
     }
   }
 

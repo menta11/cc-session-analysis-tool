@@ -14,7 +14,7 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-/** 收集树中所有甘特段的边界（排序去重），供滑块吸附。用完整树（非裁剪后），保证边界齐全。 */
+/** 收集树中所有甘特段的边界（排序去重），供滑块吸附。 */
 function allSegmentBoundaries(tree: TreeNode): number[] {
   const set = new Set<number>()
   const walk = (n: TreeNode): void => {
@@ -26,6 +26,11 @@ function allSegmentBoundaries(tree: TreeNode): number[] {
   }
   walk(tree)
   return [...set].sort((a, b) => a - b)
+}
+
+/** 只保留落在 [lo, hi] 内的边界（滑块吸附用「可视区内」的边界）。 */
+function boundariesInRange(boundaries: number[], lo: number, hi: number): number[] {
+  return boundaries.filter((b) => b >= lo && b <= hi)
 }
 
 const GANTT_W = 320
@@ -49,41 +54,50 @@ export function TimeTree(props: {
   const rootStart = props.session.startedAt ?? 0
   const rootEnd = props.session.endedAt ?? 0
   const rootWall = Math.max(1, rootEnd - rootStart)
-  const boundaries = allSegmentBoundaries(fullTree)
+  const allBoundaries = allSegmentBoundaries(fullTree)
 
-  // 滑块窗口（分析范围，离散段边界）；props 提供或回退全会话
+  // 滑块窗口（分析范围）：只影响统计，不影响甘特渲染
   const effectiveWindow: ViewWindow = props.viewWindow ?? { start: rootStart, end: rootEnd }
   const win = clampWindow(effectiveWindow, rootStart, rootEnd, MIN_WINDOW)
   const winDuration = Math.max(1, win.end - win.start)
-  // 窗口内裁剪树（统计按窗口）
-  const tree = clipTreeToWindow(fullTree, win.start, win.end)
+  // 窗口裁剪树（统计用：ms/count/占比）
+  const statTree = clipTreeToWindow(fullTree, win.start, win.end)
 
   const [ganttW, setGanttW] = useState(GANTT_W)
   const [dragging, setDragging] = useState(false)
   const dragRef = useRef<{ startX: number; startW: number } | null>(null)
 
-  // ── 缩放（pxPerMs，独立于窗口）──
-  // 内容像素宽 = winDuration * pxPerMs；可视区 = ganttW
-  const [pxPerMs, setPxPerMs] = useState(() => ganttW / winDuration)
-  const [visOffsetPx, setVisOffsetPx] = useState(0)
-  const contentWidth = winDuration * pxPerMs
-  const canScroll = contentWidth > ganttW
-  const maxOffset = Math.max(0, contentWidth - ganttW)
-  const clampedOffset = Math.min(maxOffset, Math.max(0, visOffsetPx))
+  // ── 可视区（锚定全会话时间轴，独立于窗口）──
+  // visStartTs = 可视区起点（绝对 ts）；pxPerMs = 缩放密度
+  // 可视区时间范围 = [visStartTs, visStartTs + ganttW/pxPerMs]
+  const [pxPerMs, setPxPerMs] = useState(() => ganttW / rootWall)
+  const [visStartTs, setVisStartTs] = useState(rootStart)
+  // 会话范围限制可视区
+  const visSpan = ganttW / Math.max(pxPerMs, 1e-9)
+  const clampedVisStart = Math.min(rootEnd - visSpan, Math.max(rootStart, visStartTs))
+  const visEndTs = clampedVisStart + visSpan
+  const visDuration = Math.max(1, visEndTs - clampedVisStart)
 
-  // 窗口变化时重置缩放/可视区（新窗口默认满宽）
+  // 滑块相对可视区的像素位置（clamp 到轨道内，跑出可视区则卡边缘）
+  const sliderPx = (ts: number): number => {
+    const px = ((ts - clampedVisStart) / visDuration) * ganttW
+    return Math.min(ganttW, Math.max(0, px))
+  }
+  const startPx = sliderPx(win.start)
+  const endPx = sliderPx(win.end)
+  // 高亮条 = 窗口 ∩ 可视区（左侧/右侧裁切）
+  const hlLeft = Math.max(0, ((win.start - clampedVisStart) / visDuration) * ganttW)
+  const hlRight = Math.min(ganttW, ((win.end - clampedVisStart) / visDuration) * ganttW)
+  const hlWidth = Math.max(0, hlRight - hlLeft)
+
+  // 会话切换（rootStart/rootEnd 变化）时重置可视区
   useEffect(() => {
-    setPxPerMs(ganttW / winDuration)
-    setVisOffsetPx(0)
+    setPxPerMs(ganttW / rootWall)
+    setVisStartTs(rootStart)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [win.start, win.end])
+  }, [rootStart, rootEnd])
 
-  // 窗口内可视区的时间范围（刻度/渲染用）
-  const visStartTs = win.start + clampedOffset / pxPerMs
-  const visEndTs = win.start + (clampedOffset + ganttW) / pxPerMs
-  const visDuration = Math.max(1, visEndTs - visStartTs)
-
-  // ctrl+滚轮缩放：以鼠标焦点为锚点，保持该时间点像素位置不变
+  // ctrl+滚轮缩放：以鼠标焦点为锚点
   const onWheel = (e: React.WheelEvent): void => {
     if (!e.ctrlKey) return
     e.preventDefault()
@@ -91,26 +105,25 @@ export function TimeTree(props: {
     if (!el) return
     const rect = el.getBoundingClientRect()
     const xInVis = Math.min(ganttW, Math.max(0, e.clientX - rect.left))
-    const anchorTs = visStartTs + (xInVis / ganttW) * visDuration
+    const anchorTs = clampedVisStart + (xInVis / ganttW) * visDuration
     const factor = e.deltaY < 0 ? 1.25 : 1 / 1.25
-    const next = Math.max(ganttW / winDuration, pxPerMs * factor) // 下限 = 整窗满宽
-    // 锚点时间在可视区内的像素位置不变
-    const anchorPx = (anchorTs - win.start) * next
-    const newOffset = anchorPx - xInVis
+    const next = Math.max(ganttW / rootWall, pxPerMs * factor) // 下限 = 全会话满宽
+    // 锚点时间像素位置不变
+    const anchorPx = (anchorTs - rootStart) * next
+    const newVisStart = rootStart + (anchorPx - xInVis) / next
     setPxPerMs(next)
-    setVisOffsetPx(Math.min(Math.max(0, newOffset), Math.max(0, winDuration * next - ganttW)))
+    setVisStartTs(Math.min(rootEnd - ganttW / next, Math.max(rootStart, newVisStart)))
   }
 
   const ganttTrackRef = useRef<HTMLDivElement>(null)
 
-  // ── 滚动条：窗口内平移可视区 ──
+  // ── 滚动条：全会话内平移可视区 ──
   const scrollbarRef = useRef<HTMLDivElement>(null)
-  const scrollbarDragRef = useRef<{ startX: number; startOffset: number } | null>(null)
+  const scrollbarDragRef = useRef<{ startX: number; startVis: number } | null>(null)
   const onScrollbarDown = (e: React.MouseEvent): void => {
-    if (!canScroll) return
     e.preventDefault()
     e.stopPropagation()
-    scrollbarDragRef.current = { startX: e.clientX, startOffset: clampedOffset }
+    scrollbarDragRef.current = { startX: e.clientX, startVis: clampedVisStart }
     const mm = (ev: MouseEvent): void => {
       const d = scrollbarDragRef.current
       const el = scrollbarRef.current
@@ -118,7 +131,7 @@ export function TimeTree(props: {
       const rect = el.getBoundingClientRect()
       const dx = ev.clientX - d.startX
       const ratio = dx / rect.width
-      setVisOffsetPx(Math.min(maxOffset, Math.max(0, d.startOffset + ratio * contentWidth)))
+      setVisStartTs(Math.min(rootEnd - visSpan, Math.max(rootStart, d.startVis + ratio * rootWall)))
     }
     const up = (): void => {
       scrollbarDragRef.current = null
@@ -129,7 +142,7 @@ export function TimeTree(props: {
     window.addEventListener('mouseup', up)
   }
 
-  // ── 滑块：限定分析窗口（离散段边界） ──
+  // ── 滑块：限定分析窗口（离散段边界，吸附可视区内边界）──
   const [sliderDrag, setSliderDrag] = useState<'start' | 'end' | null>(null)
   const sliderRef = useRef<HTMLDivElement>(null)
   const sliderDragRef = useRef<{ startX: number; startTs: number; endTs: number; which: 'start' | 'end' } | null>(null)
@@ -146,14 +159,21 @@ export function TimeTree(props: {
       if (!d || !el || !props.onWindowChange) return
       const rect = el.getBoundingClientRect()
       const ratio = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width))
-      const ts = rootStart + ratio * rootWall
-      let next = { start: d.startTs, end: d.endTs }
+      // 轨道显示可视区，拖动按可视区时间换算
+      const ts = clampedVisStart + ratio * visDuration
+      // 只改被拖的滑块，另一个锚定不动（不 clamp 整个窗口，避免未拖滑块被扩展）
+      let start = d.startTs
+      let end = d.endTs
       if (d.which === 'start') {
-        next.start = Math.min(ts, d.endTs - MIN_WINDOW)
+        start = Math.min(ts, end - MIN_WINDOW)
+        start = Math.max(rootStart, start)
       } else {
-        next.end = Math.max(ts, d.startTs + MIN_WINDOW)
+        end = Math.max(ts, start + MIN_WINDOW)
+        end = Math.min(rootEnd, end)
       }
-      props.onWindowChange(clampWindow(next, rootStart, rootEnd, MIN_WINDOW))
+      d.startTs = start
+      d.endTs = end
+      props.onWindowChange({ start, end })
     }
     const up = (): void => {
       const d = sliderDragRef.current
@@ -162,11 +182,18 @@ export function TimeTree(props: {
       window.removeEventListener('mousemove', mm)
       window.removeEventListener('mouseup', up)
       if (d && props.onWindowChange) {
-        // 松手吸附到最近段边界（用完整树的边界），保证 start<end 且边界在会话内
-        const sStart = snapToSegmentBoundary(d.startTs, boundaries)
-        const sEnd = snapToSegmentBoundary(d.endTs, boundaries)
-        const next = clampWindow({ start: sStart, end: sEnd }, rootStart, rootEnd, MIN_WINDOW)
-        props.onWindowChange(next)
+        // 只吸附被拖的滑块，另一个保持不动
+        const local = boundariesInRange(allBoundaries, clampedVisStart, visEndTs)
+        let start = d.startTs
+        let end = d.endTs
+        if (d.which === 'start') {
+          const s = snapToSegmentBoundary(d.startTs, local)
+          if (s < end) start = s // 吸附后不越过对方
+        } else {
+          const s = snapToSegmentBoundary(d.endTs, local)
+          if (s > start) end = s
+        }
+        props.onWindowChange({ start, end })
       }
     }
     window.addEventListener('mousemove', mm)
@@ -212,7 +239,7 @@ export function TimeTree(props: {
       style={{ fontFamily: 'var(--font-sans)', fontSize: 'var(--fs-base)', color: 'var(--text)', userSelect: 'none' }}
       onWheel={onWheel}
     >
-      {/* 表头：标签列 + 时间轴 + 甘特列拖柄（sticky） */}
+      {/* 表头：标签列 + 时长列 + 甘特刻度（sticky） */}
       <div
         style={{
           display: 'flex',
@@ -235,7 +262,7 @@ export function TimeTree(props: {
             handleCopy(props.session.sessionId, '已复制会话 ID')
           }}
         >
-          {tree.label}
+          {fullTree.label}
         </span>
         <span style={{ width: COL_BAR }} />
         <span style={{ width: COL_DUR, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtMs(winDuration)}</span>
@@ -271,7 +298,7 @@ export function TimeTree(props: {
                 whiteSpace: 'nowrap',
               }}
             >
-              {fmtMs(visStartTs - rootStart + t * visDuration)}
+              {fmtMs(clampedVisStart - rootStart + t * visDuration)}
             </span>
           ))}
         </div>
@@ -280,7 +307,6 @@ export function TimeTree(props: {
       {/* 双滑块：仅横跨甘特列，限定分析窗口 */}
       {props.onWindowChange ? (
         <div
-          ref={sliderRef}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -297,10 +323,9 @@ export function TimeTree(props: {
           <span style={{ width: COL_BAR }} />
           <span style={{ width: COL_DUR }} />
           <span style={{ width: COL_PCT }} />
-          <div style={{ width: ganttW, flex: `0 0 ${ganttW}px`, marginLeft: 8, position: 'relative', height: 18 }}>
-            {/* 轨道 */}
+          <div ref={sliderRef} style={{ width: ganttW, flex: `0 0 ${ganttW}px`, marginLeft: 8, position: 'relative', height: 18 }}>
             <div style={{ position: 'absolute', left: 0, right: 0, top: 7, height: 4, background: 'var(--bg-active)', borderRadius: 2 }} />
-            {/* 选中区间 */}
+            {/* 选中区间（窗口 ∩ 可视区，裁切） */}
             <div
               style={{
                 position: 'absolute',
@@ -308,8 +333,8 @@ export function TimeTree(props: {
                 height: 4,
                 background: 'var(--accent)',
                 borderRadius: 2,
-                left: `${((win.start - rootStart) / rootWall) * 100}%`,
-                width: `${((win.end - win.start) / rootWall) * 100}%`,
+                left: `${hlLeft}px`,
+                width: `${hlWidth}px`,
               }}
             />
             {/* 起始滑块 */}
@@ -317,7 +342,7 @@ export function TimeTree(props: {
               onMouseDown={(e) => onSliderDown(e, 'start')}
               style={{
                 position: 'absolute',
-                left: `${((win.start - rootStart) / rootWall) * 100}%`,
+                left: `${startPx}px`,
                 top: 0,
                 width: 8,
                 height: 18,
@@ -327,14 +352,14 @@ export function TimeTree(props: {
                 borderRadius: 4,
                 cursor: 'col-resize',
               }}
-              title="拖动选择分析开始时间"
+              title={`分析开始 ${fmtMs(win.start - rootStart)}`}
             />
             {/* 结束滑块 */}
             <div
               onMouseDown={(e) => onSliderDown(e, 'end')}
               style={{
                 position: 'absolute',
-                left: `${((win.end - rootStart) / rootWall) * 100}%`,
+                left: `${endPx}px`,
                 top: 0,
                 width: 8,
                 height: 18,
@@ -344,7 +369,7 @@ export function TimeTree(props: {
                 borderRadius: 4,
                 cursor: 'col-resize',
               }}
-              title="拖动选择分析结束时间"
+              title={`分析结束 ${fmtMs(win.end - rootStart)}`}
             />
             <span style={{ position: 'absolute', right: 0, top: 0, fontSize: 'var(--fs-xs)', color: 'var(--text-faint)' }}>
               {fmtMs(win.end - win.start)}
@@ -355,11 +380,9 @@ export function TimeTree(props: {
 
       <Legend />
 
-      {/* 水平滚动条（仅甘特列，缩放后出现）：窗口内平移可视区 */}
-      {canScroll ? (
-        <div
-          style={{ display: 'flex', padding: '2px 8px' }}
-        >
+      {/* 水平滚动条（仅甘特列，缩放后可视区窄于全会话出现）：全会话内平移可视区 */}
+      {visSpan < rootWall ? (
+        <div style={{ display: 'flex', padding: '2px 8px' }}>
           <span style={{ width: CHEVRON }} />
           <span style={{ flex: 1 }} />
           <span style={{ width: COL_BAR }} />
@@ -385,8 +408,8 @@ export function TimeTree(props: {
                 position: 'absolute',
                 top: 1,
                 bottom: 1,
-                left: `${(clampedOffset / contentWidth) * 100}%`,
-                width: `${(ganttW / contentWidth) * 100}%`,
+                left: `${((clampedVisStart - rootStart) / rootWall) * 100}%`,
+                width: `${(visSpan / rootWall) * 100}%`,
                 background: 'var(--accent-soft)',
                 border: '1px solid var(--accent)',
                 borderRadius: 5,
@@ -396,15 +419,15 @@ export function TimeTree(props: {
         </div>
       ) : null}
 
-      {tree.children!.map((c, i) => (
+      {statTree.children!.map((c, i) => (
         <Row
           key={c.id}
           node={c}
+          ganttNode={fullTree.children?.[i]}
           depth={0}
           stripe={i % 2 === 1}
-          win={win}
+          visStart={clampedVisStart}
           pxPerMs={pxPerMs}
-          visOffsetPx={clampedOffset}
           ganttW={ganttW}
           onSelect={props.onSelect}
           selectedId={props.selectedId}
@@ -420,17 +443,17 @@ export function TimeTree(props: {
 }
 
 function Row(props: {
-  node: TreeNode
+  node: TreeNode // 统计节点（窗口裁剪后：ms/count/占比）
+  ganttNode?: TreeNode // 甘特节点（全会话原始段，甘特渲染用）
   depth: number
   stripe?: boolean
-  win: ViewWindow
+  visStart: number
   pxPerMs: number
-  visOffsetPx: number
   ganttW: number
   onSelect: (n: TreeNode) => void
   selectedId?: string
 }): JSX.Element {
-  const { node, depth, stripe, win, pxPerMs, visOffsetPx, ganttW, onSelect, selectedId } = props
+  const { node, ganttNode, depth, stripe, visStart, pxPerMs, ganttW, onSelect, selectedId } = props
   const [open, setOpen] = useState(depth < 1)
   const hasKids = !!node.children?.length
   const expandable = !!node.expandable && !!node.childSession
@@ -478,38 +501,36 @@ function Row(props: {
         <span style={{ width: COL_PCT, flex: `0 0 ${COL_PCT}px`, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--text-faint)' }}>
           {p}%
         </span>
-        {/* 甘特：窗口内按时序像素定位 */}
-        <Gantt segments={node.segments} win={win} pxPerMs={pxPerMs} visOffsetPx={visOffsetPx} ganttW={ganttW} />
+        {/* 甘特：全会话段（ganttNode，非窗口裁剪）按可视区（visStart + pxPerMs）裁剪定位 */}
+        <Gantt segments={ganttNode?.segments} visStart={visStart} pxPerMs={pxPerMs} ganttW={ganttW} />
       </div>
 
       {open && branch && hasKids &&
-        node.children!.map((c) => (
-          <Row key={c.id} node={c} depth={depth + 1} win={win} pxPerMs={pxPerMs} visOffsetPx={visOffsetPx} ganttW={ganttW} onSelect={onSelect} selectedId={selectedId} />
+        node.children!.map((c, i) => (
+          <Row key={c.id} node={c} ganttNode={ganttNode?.children?.[i]} depth={depth + 1} visStart={visStart} pxPerMs={pxPerMs} ganttW={ganttW} onSelect={onSelect} selectedId={selectedId} />
         ))}
       {open && branch && expandable && (
-        <ChildTree child={node.childSession!} depth={depth + 1} win={win} pxPerMs={pxPerMs} visOffsetPx={visOffsetPx} ganttW={ganttW} onSelect={onSelect} selectedId={selectedId} />
+        <ChildTree child={node.childSession!} depth={depth + 1} visStart={visStart} pxPerMs={pxPerMs} ganttW={ganttW} onSelect={onSelect} selectedId={selectedId} />
       )}
     </div>
   )
 }
 
-/** 子 agent 展开：其分解树子节点，同窗口/缩放定位。 */
+/** 子 agent 展开：其分解树子节点，同可视区/缩放定位；统计不随窗口（子 agent 不在窗口裁剪内）。 */
 function ChildTree(props: {
   child: Session
   depth: number
-  win: ViewWindow
+  visStart: number
   pxPerMs: number
-  visOffsetPx: number
   ganttW: number
   onSelect: (n: TreeNode) => void
   selectedId?: string
 }): JSX.Element {
   const full = buildTreeNode(props.child)
-  const tree = clipTreeToWindow(full, props.win.start, props.win.end)
   return (
     <>
-      {tree.children!.map((c) => (
-        <Row key={c.id} node={c} depth={props.depth} win={props.win} pxPerMs={props.pxPerMs} visOffsetPx={props.visOffsetPx} ganttW={props.ganttW} onSelect={props.onSelect} selectedId={props.selectedId} />
+      {full.children!.map((c) => (
+        <Row key={c.id} node={c} depth={props.depth} visStart={props.visStart} pxPerMs={props.pxPerMs} ganttW={props.ganttW} onSelect={props.onSelect} selectedId={props.selectedId} />
       ))}
     </>
   )
@@ -534,14 +555,9 @@ function Legend(): JSX.Element {
   )
 }
 
-function Gantt(props: {
-  segments?: Segment[]
-  win: ViewWindow
-  pxPerMs: number
-  visOffsetPx: number
-  ganttW: number
-}): JSX.Element {
-  const { segments, win, pxPerMs, visOffsetPx, ganttW } = props
+function Gantt(props: { segments?: Segment[]; visStart: number; pxPerMs: number; ganttW: number }): JSX.Element {
+  const { segments, visStart, pxPerMs, ganttW } = props
+  const visEnd = visStart + ganttW / Math.max(pxPerMs, 1e-9)
   return (
     <div
       style={{
@@ -559,10 +575,13 @@ function Gantt(props: {
     >
       {(segments ?? []).map((s, i) => {
         if (s.end <= s.start) return null
-        // 段在窗口内的像素位置（减去可视区偏移）
-        const pxLeft = (s.start - win.start) * pxPerMs - visOffsetPx
-        const pxWidth = (s.end - s.start) * pxPerMs
-        if (pxLeft + pxWidth <= 0 || pxLeft >= ganttW) return null // 可视区外
+        // 段在可视区外的部分裁剪
+        const clipStart = Math.max(s.start, visStart)
+        const clipEnd = Math.min(s.end, visEnd)
+        if (clipEnd <= clipStart) return null
+        const pxLeft = (clipStart - visStart) * pxPerMs
+        const pxWidth = (clipEnd - clipStart) * pxPerMs
+        if (pxLeft + pxWidth <= 0 || pxLeft >= ganttW) return null
         return (
           <div
             key={i}
