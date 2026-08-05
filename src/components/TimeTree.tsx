@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { Session } from '../../core/parser/types'
 import { buildTreeNode, clipTreeToWindow, type Segment, type TreeNode } from '../../core/view/treeView'
 import { clampWindow, snapToSegmentBoundary, type ViewWindow } from '../../core/view/window'
-import { fmtMs, pct } from '../../core/view/format'
+import { fmtMs, fmtTs, pct } from '../../core/view/format'
 
 /** 复制文本到剪贴板，返回是否成功（Electron 渲染进程支持 navigator.clipboard） */
 async function copyText(text: string): Promise<boolean> {
@@ -298,7 +298,7 @@ export function TimeTree(props: {
                 whiteSpace: 'nowrap',
               }}
             >
-              {fmtMs(clampedVisStart - rootStart + t * visDuration)}
+              {fmtTs(clampedVisStart + t * visDuration)}
             </span>
           ))}
         </div>
@@ -352,7 +352,7 @@ export function TimeTree(props: {
                 borderRadius: 4,
                 cursor: 'col-resize',
               }}
-              title={`分析开始 ${fmtMs(win.start - rootStart)}`}
+              title={`分析开始 ${fmtTs(win.start)}`}
             />
             {/* 结束滑块 */}
             <div
@@ -369,16 +369,13 @@ export function TimeTree(props: {
                 borderRadius: 4,
                 cursor: 'col-resize',
               }}
-              title={`分析结束 ${fmtMs(win.end - rootStart)}`}
+              title={`分析结束 ${fmtTs(win.end)}`}
             />
-            <span style={{ position: 'absolute', right: 0, top: 0, fontSize: 'var(--fs-xs)', color: 'var(--text-faint)' }}>
-              {fmtMs(win.end - win.start)}
-            </span>
           </div>
         </div>
       ) : null}
 
-      <Legend />
+      <Legend windowLabel={props.onWindowChange ? `${fmtTs(win.start)} ~ ${fmtTs(win.end)}` : undefined} />
 
       {/* 水平滚动条（仅甘特列，缩放后可视区窄于全会话出现）：全会话内平移可视区 */}
       {visSpan < rootWall ? (
@@ -536,7 +533,7 @@ function ChildTree(props: {
   )
 }
 
-function Legend(): JSX.Element {
+function Legend(props: { windowLabel?: string }): JSX.Element {
   const items: [string, string][] = [
     ['等用户', 'var(--cat-wait)'],
     ['直接工具', 'var(--cat-direct)'],
@@ -551,6 +548,9 @@ function Legend(): JSX.Element {
           {label}
         </span>
       ))}
+      {props.windowLabel ? (
+        <span style={{ marginLeft: 'auto', color: 'var(--text-secondary)' }}>{props.windowLabel}</span>
+      ) : null}
     </div>
   )
 }

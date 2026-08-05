@@ -6,11 +6,12 @@ export function AiReport(props: {
   loading: boolean
   error: string
   sessionId?: string
+  aiScope?: 'whole' | 'window'
   onGenerate: () => void
   onSave: () => void
   onOpenTerminal: () => void
 }): JSX.Element {
-  const { text, loading, error, sessionId, onGenerate, onSave, onOpenTerminal } = props
+  const { text, loading, error, sessionId, aiScope, onGenerate, onSave, onOpenTerminal } = props
   const btn: React.CSSProperties = {
     padding: '4px 12px',
     border: '1px solid var(--border-strong)',
@@ -27,7 +28,7 @@ export function AiReport(props: {
     <div style={{ padding: 'var(--sp-3)', height: '100%', display: 'flex', flexDirection: 'column' }}>
       <div style={{ marginBottom: 'var(--sp-2)', display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
         <button onClick={onGenerate} disabled={loading} style={btnStyle(loading)}>
-          {loading ? '分析中…' : '生成整会话分析'}
+          {loading ? '分析中…' : aiScope === 'window' ? '生成时间块分析' : '生成整会话分析'}
         </button>
         <button onClick={onSave} disabled={!text || loading} style={btnStyle(!text || loading)}>
           导出 .md

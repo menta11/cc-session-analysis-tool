@@ -255,6 +255,7 @@ export function App(): JSX.Element {
                       loading={cur.loading}
                       error={cur.error}
                       sessionId={cur.claudeId}
+                      aiScope={aiScope}
                       onGenerate={analyzeWhole}
                       onSave={save}
                       onOpenTerminal={() => {
