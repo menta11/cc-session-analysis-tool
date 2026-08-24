@@ -52,6 +52,13 @@ dist-mac:
 dist-linux:
     npm run dist:linux
 
+# 把最新版本(package.json 的 version)的 dmg + Win NSIS Setup 打成一个 zip -> dist/
+# 只消费 dist/ 现有产物，不重新构建（与 dist-mac「不重复依赖」一致）
+# 前置：先跑 just dist-win；Mac dmg 需在 macOS 上 just dist-mac 后拷贝到本机 dist/
+# 跨平台：win 用系统 tar(bsdtar)，mac/linux 用系统 zip
+dist-zip:
+    node build/pack-zip.mjs
+
 # 清理打包产物
 clean:
     rm -rf dist
