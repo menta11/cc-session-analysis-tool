@@ -51,7 +51,7 @@ export function App(): JSX.Element {
       <header style={appbarStyle}>
         <span style={brandStyle}>
           <span style={logoStyle}>C</span>
-          AI 会话工具集
+          Claude 会话工具集
         </span>
         <nav style={tabsStyle} aria-label="页面切换">
           {PAGES.map((p) => (

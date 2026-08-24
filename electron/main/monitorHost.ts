@@ -86,7 +86,7 @@ function createTray(): void {
   if (!icon || icon.isEmpty()) icon = nativeImage.createEmpty()
 
   tray = new Tray(icon)
-  tray.setToolTip('AI 会话工具集 · 实时监控')
+  tray.setToolTip('Claude 会话工具集 · 实时监控')
   tray.on('click', () => {
     const win = getMainWindow()
     if (!win || win.isDestroyed()) {
