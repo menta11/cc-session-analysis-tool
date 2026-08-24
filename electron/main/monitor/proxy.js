@@ -1713,8 +1713,9 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Serve dashboard. Dev 模式每次读磁盘(热加载); 生产用启动缓存.
-  if (req.url === '/' || req.url === '/index.html') {
+  // Serve dashboard. 容忍 query string (?theme= 由宿主 iframe 首帧带入). Dev 模式每次读磁盘(热加载); 生产用启动缓存.
+  const dashPath = (req.url || '').split('?')[0];
+  if (dashPath === '/' || dashPath === '/index.html') {
     try {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(serveDashboardHtml());

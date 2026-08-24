@@ -4,10 +4,51 @@
 <meta charset="utf-8">
 <title>cc-monitor</title>
 <style>
+  /* 主题调色板: 暗色为默认值, 亮色经 [data-theme='light'] 覆盖. 宿主(React)切换主题后
+   * 通过 ?theme= (首帧) + postMessage {type:'theme'} (实时) 驱动 document.documentElement.dataset.theme. */
+  :root {
+    color-scheme: dark;
+    --bg-page: #1a1a2e;   --bg-deep: #14142a;  --bg-hover: #1a1a3a;
+    --bg-input: #11112a;  --bg-code: #0a0a1a;  --bg-warn-tint: #3a2a1a;
+    --bg-search-hit: #3a2a14; --bg-search-current: #5a4017;
+    --border: #2a2a4a;    --border-strong: #3a3a5a; --border-teal: #2a4a4a;
+    --border-err: #3a1a1a;
+    --text: #e0e0e0;      --text-secondary: #ccc; --text-faint: #888;
+    --text-dim: #666;     --text-muted: #555;    --text-header: #556;
+    --text-faintest: #444; --text-extra-faint: #333; --chip-on: #ddd;
+    --white: #fff;
+    --accent: #00d4d4;    --accent-hover-bg: #2a3a4a;
+    --ok: #00ff88;        --ok-chip: #00cc55;
+    --warn: #ffaa00;      --warn2: #ffaa33;      --warn-soft: #ffcc66; --warn-orange: #ffa500;
+    --err: #ff4444;       --err-soft: #ff6666;   --err-msg: #ff7777;  --sev-err: #ff6b6b;
+    --slow-orange: #ff8833; --orange-red: #ff6644;
+    --pink: #ff66aa;      --think: #aa88ff;
+    --blue: #4488ff;      --blue-light: #88ccff; --blue-dim: #6688cc; --blue-wait: #00aaff;
+    --green-msg: #88cc88; --notice: #dddd44;     --notice-msg: #ddd888;
+  }
+  [data-theme='light'] {
+    color-scheme: light;
+    --bg-page: #f4f4fa;   --bg-deep: #ececf3;   --bg-hover: #e9eaf2;
+    --bg-input: #ffffff;  --bg-code: #f1f1f8;   --bg-warn-tint: #f7ecd9;
+    --bg-search-hit: #f6e9d0; --bg-search-current: #f0dcae;
+    --border: #d9dae4;    --border-strong: #c6c8d6; --border-teal: #a9cdcd;
+    --border-err: #f0dddd;
+    --text: #1d1d2a;      --text-secondary: #3c3c4d; --text-faint: #5f5f70;
+    --text-dim: #767687;  --text-muted: #92929f;  --text-header: #707083;
+    --text-faintest: #9f9fae; --text-extra-faint: #b5b5c2; --chip-on: #505065;
+    --accent: #007f7f;    --accent-hover-bg: #e6f1f1;
+    --ok: #008f4c;        --ok-chip: #00a05c;
+    --warn: #b26a00;      --warn2: #b97a1e;      --warn-soft: #c08a3c; --warn-orange: #b36a00;
+    --err: #d63434;       --err-soft: #d34a4a;   --err-msg: #cf5f5f;  --sev-err: #d05555;
+    --slow-orange: #c05f1e; --orange-red: #d2552e;
+    --pink: #c93f88;      --think: #7a5fd0;
+    --blue: #295ec8;      --blue-light: #2f6ed4; --blue-dim: #46669e; --blue-wait: #0070b8;
+    --green-msg: #3d9a5c; --notice: #9a9a2a;     --notice-msg: #8f8f3a;
+  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    background: #1a1a2e;
-    color: #e0e0e0;
+    background: var(--bg-page);
+    color: var(--text);
     font-family: 'Cascadia Code', 'Consolas', 'Courier New', monospace;
     font-size: 13px;
     overflow-y: auto;
@@ -15,18 +56,18 @@
   }
   .header {
     padding: 12px 16px 8px;
-    border-bottom: 1px solid #2a2a4a;
+    border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
     gap: 12px;
   }
   .header h1 {
     font-size: 15px;
-    color: #00d4d4;
+    color: var(--accent);
     font-weight: bold;
   }
   .header .ts {
-    color: #666;
+    color: var(--text-dim);
     font-size: 12px;
     margin-left: auto;
   }
@@ -35,29 +76,29 @@
     display: flex;
     gap: 24px;
     align-items: center;
-    border-bottom: 1px solid #2a2a4a;
+    border-bottom: 1px solid var(--border);
     font-size: 12px;
   }
-  .status-bar .label { color: #888; }
+  .status-bar .label { color: var(--text-faint); }
   .status-bar .value { font-weight: bold; }
   /* 状态栏可点配置项: hover 提示可改, click 变 input */
   .config-link {
-    color: #00d4d4; cursor: pointer; border-radius: 3px; padding: 0 4px;
+    color: var(--accent); cursor: pointer; border-radius: 3px; padding: 0 4px;
     border: 1px solid transparent;
   }
-  .config-link:hover { background: #2a2a4a; border-color: #3a3a5a; }
+  .config-link:hover { background: var(--border); border-color: var(--border-strong); }
   .config-link input {
-    width: 56px; background: #11112a; color: #00d4d4; border: 1px solid #3a3a5a;
+    width: 56px; background: var(--bg-input); color: var(--accent); border: 1px solid var(--border-strong);
     border-radius: 3px; padding: 1px 4px; font: inherit; font-weight: bold;
   }
-  .active { color: #00ff88; }
-  .idle { color: #888; }
+  .active { color: var(--ok); }
+  .idle { color: var(--text-faint); }
   .monitor-toggle { display: flex; align-items: center; gap: 8px; }
   .switch {
     width: 44px;
     height: 22px;
-    background: #3a3a5a;
-    border: 1px solid #4a4a6a;
+    background: var(--border-strong);
+    border: 1px solid var(--border-strong);
     border-radius: 11px;
     position: relative;
     cursor: pointer;
@@ -65,7 +106,7 @@
     transition: background 0.2s, border-color 0.2s;
     flex-shrink: 0;
   }
-  .switch.on { background: #00cc55; border-color: #00cc55; }
+  .switch.on { background: var(--ok-chip); border-color: var(--ok-chip); }
   .switch:hover:not(:disabled) { opacity: 0.88; }
   .switch:disabled { opacity: 0.5; cursor: wait; }
   .switch-knob {
@@ -74,7 +115,7 @@
     left: 2px;
     width: 16px;
     height: 16px;
-    background: #fff;
+    background: var(--white);
     border-radius: 50%;
     box-shadow: 0 1px 3px rgba(0,0,0,0.5);
     transition: transform 0.2s;
@@ -82,16 +123,16 @@
   }
   .switch.on .switch-knob { transform: translateX(22px); }
   .switch-text { font-size: 12px; font-weight: bold; min-width: 48px; }
-  .switch-text.on { color: #00ff88; }
-  .switch-text.off { color: #666; }
+  .switch-text.on { color: var(--ok); }
+  .switch-text.off { color: var(--text-dim); }
 
   .col-header {
     padding: 6px 16px;
     display: grid;
     grid-template-columns: 120px 100px calc(80px + 3ch) calc(160px + 10ch) 84px;
-    color: #556;
+    color: var(--text-header);
     font-size: 11px;
-    border-bottom: 1px solid #2a2a4a;
+    border-bottom: 1px solid var(--border);
     text-transform: uppercase;
   }
 
@@ -100,7 +141,7 @@
     display: grid;
     grid-template-columns: 120px 100px calc(80px + 3ch) calc(160px + 10ch) 84px;
     align-items: center;
-    border-bottom: 1px solid #1a1a2e;
+    border-bottom: 1px solid var(--bg-page);
   }
   /* State 列整体右移一个单词（5ch = monospace 下一单词宽） */
   .col-header > :nth-child(4),
@@ -112,14 +153,14 @@
   }
   .agent-row.sub::before {
     content: '└';
-    color: #444;
+    color: var(--text-faintest);
     position: absolute;
     margin-left: -12px;
   }
   .agent-row.orphan-header {
     padding: 8px 16px 4px;
     display: block;
-    color: #555;
+    color: var(--text-muted);
     font-style: italic;
     font-size: 12px;
     font-weight: normal;
@@ -132,20 +173,20 @@
     font-family: monospace;
     letter-spacing: -1px;
   }
-  .bar-char { color: #333; }
+  .bar-char { color: var(--text-extra-faint); }
   .io { font-size: 12px; white-space: nowrap; }
-  .io-in { color: #4488ff; font-weight: bold; }
-  .io-out { color: #ffaa33; font-weight: bold; }
+  .io-in { color: var(--blue); font-weight: bold; }
+  .io-out { color: var(--warn2); font-weight: bold; }
 
   .state { font-size: 12px; font-weight: bold; white-space: nowrap; }
-  .state-stream { color: #00ff88; }
-  .state-stream-think { color: #aa88ff; }
-  .state-stream-text { color: #00ff88; }
-  .state-waiting { color: #00aaff; }
-  .state-work { color: #ffaa00; }
-  .state-sse-stuck { color: #ff4444; animation: blink 0.8s infinite; }
-  .state-disconnected { color: #ff6644; animation: blink 1.5s infinite; }
-  .state-idle { color: #666; }
+  .state-stream { color: var(--ok); }
+  .state-stream-think { color: var(--think); }
+  .state-stream-text { color: var(--ok); }
+  .state-waiting { color: var(--blue-wait); }
+  .state-work { color: var(--warn); }
+  .state-sse-stuck { color: var(--err); animation: blink 0.8s infinite; }
+  .state-disconnected { color: var(--orange-red); animation: blink 1.5s infinite; }
+  .state-idle { color: var(--text-dim); }
 
   @keyframes blink {
     0%, 100% { opacity: 1; }
@@ -159,28 +200,28 @@
     font-size: 11px; font-family: inherit; line-height: 1;
     margin-right: 3px; border: 1px solid;
   }
-  .op-btn--tl { background: #2a2a4a; color: #00d4d4; border-color: #3a3a5a; }
-  .op-btn--tl:hover { background: #3a3a5a; }
-  .op-btn--kill { background: #ff4444; color: #fff; border-color: #ff4444; font-weight: bold; }
-  .op-btn--kill:hover:not(:disabled) { background: #ff6666; border-color: #ff6666; }
+  .op-btn--tl { background: var(--border); color: var(--accent); border-color: var(--border-strong); }
+  .op-btn--tl:hover { background: var(--border-strong); }
+  .op-btn--kill { background: var(--err); color: var(--white); border-color: var(--err); font-weight: bold; }
+  .op-btn--kill:hover:not(:disabled) { background: var(--err-soft); border-color: var(--err-soft); }
   .op-btn--kill:disabled { opacity: 0.5; cursor: wait; }
   .agent-row.killable .op-btn--kill { animation: blink 0.8s infinite; }
 
   .no-agents {
     padding: 40px 16px;
     text-align: center;
-    color: #555;
+    color: var(--text-muted);
   }
   .no-agents .hint {
     margin-top: 8px;
     font-size: 11px;
-    color: #444;
+    color: var(--text-faintest);
   }
 
   /* Session 时间线抽屉 */
   #sessionDrawer {
     position: fixed; top: 0; right: 0; height: 100vh; width: 56%;
-    background: #14142a; border-left: 1px solid #2a2a4a;
+    background: var(--bg-deep); border-left: 1px solid var(--border);
     transform: translateX(100%); transition: transform 0.2s ease;
     display: flex; flex-direction: column; z-index: 100;
     box-shadow: -4px 0 20px rgba(0,0,0,0.5);
@@ -188,126 +229,126 @@
   #sessionDrawer.open { transform: translateX(0); }
   .drawer-head {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 14px; border-bottom: 1px solid #2a2a4a;
-    font-weight: bold; color: #00d4d4; font-size: 13px;
+    padding: 10px 14px; border-bottom: 1px solid var(--border);
+    font-weight: bold; color: var(--accent); font-size: 13px;
   }
   #drawerClose {
-    background: none; border: none; color: #888; font-size: 20px;
+    background: none; border: none; color: var(--text-faint); font-size: 20px;
     cursor: pointer; line-height: 1; padding: 0 4px;
   }
-  #drawerClose:hover { color: #fff; }
+  #drawerClose:hover { color: var(--text); }
   .drawer-actions { display: flex; align-items: center; gap: 6px; }
   .copy-curl-btn {
-    background: #1a1a2e; border: 1px solid #2a4a4a; color: #00d4d4;
+    background: var(--bg-page); border: 1px solid var(--border-teal); color: var(--accent);
     font-family: inherit; font-size: 11px; padding: 3px 10px;
     border-radius: 3px; cursor: pointer;
   }
-  .copy-curl-btn:hover { background: #2a3a4a; color: #fff; }
-  .copy-curl-btn.copied { color: #00ff88; border-color: #00ff88; }
+  .copy-curl-btn:hover { background: var(--accent-hover-bg); color: var(--text); }
+  .copy-curl-btn.copied { color: var(--ok); border-color: var(--ok); }
   #drawerBody { flex: 1; overflow-y: auto; padding: 10px 14px; }
-  .drawer-loading, .drawer-empty, .drawer-error { color: #666; padding: 20px 0; text-align: center; font-size: 12px; }
-  .drawer-error { color: #ff6666; }
+  .drawer-loading, .drawer-empty, .drawer-error { color: var(--text-dim); padding: 20px 0; text-align: center; font-size: 12px; }
+  .drawer-error { color: var(--err-soft); }
   .tl-card {
     margin-bottom: 10px; padding: 8px 10px; border-radius: 4px;
-    background: #1a1a2e; border-left: 3px solid #444;
+    background: var(--bg-page); border-left: 3px solid var(--text-faintest);
   }
-  .tl-user { border-left-color: #4488ff; }
-  .tl-thinking { border-left-color: #aa88ff; }
-  .tl-text { border-left-color: #00ff88; }
-  .tl-tool { border-left-color: #ffaa33; }
+  .tl-user { border-left-color: var(--blue); }
+  .tl-thinking { border-left-color: var(--think); }
+  .tl-text { border-left-color: var(--ok); }
+  .tl-tool { border-left-color: var(--warn2); }
   .tl-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 11px; }
   .tl-label { font-weight: bold; }
-  .tl-user .tl-label { color: #4488ff; }
-  .tl-thinking .tl-label { color: #aa88ff; }
-  .tl-text .tl-label { color: #00ff88; }
-  .tl-tool .tl-label { color: #ffaa33; }
-  .tl-ts { color: #556; }
-  .tl-body { font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: #ccc; }
+  .tl-user .tl-label { color: var(--blue); }
+  .tl-thinking .tl-label { color: var(--think); }
+  .tl-text .tl-label { color: var(--ok); }
+  .tl-tool .tl-label { color: var(--warn2); }
+  .tl-ts { color: var(--text-header); }
+  .tl-body { font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: var(--text-secondary); }
   .tl-toggle {
-    display: inline-block; margin-top: 6px; background: #2a2a4a; color: #00d4d4;
-    border: 1px solid #3a3a5a; border-radius: 3px; padding: 1px 8px;
+    display: inline-block; margin-top: 6px; background: var(--border); color: var(--accent);
+    border: 1px solid var(--border-strong); border-radius: 3px; padding: 1px 8px;
     cursor: pointer; font-size: 11px; font-family: inherit;
   }
-  .tl-toggle:hover { background: #3a3a5a; }
+  .tl-toggle:hover { background: var(--border-strong); }
   .tl-copy {
-    display: inline-block; margin-top: 6px; background: #2a2a4a; color: #aaa;
-    border: 1px solid #3a3a5a; border-radius: 3px; padding: 1px 6px;
+    display: inline-block; margin-top: 6px; background: var(--border); color: var(--text-faint);
+    border: 1px solid var(--border-strong); border-radius: 3px; padding: 1px 6px;
     cursor: pointer; font-size: 11px; font-family: inherit;
   }
-  .tl-copy:hover { background: #3a3a5a; color: #fff; }
-  .tl-copy.copied { color: #00ff88; border-color: #00ff88; }
+  .tl-copy:hover { background: var(--border-strong); color: var(--text); }
+  .tl-copy.copied { color: var(--ok); border-color: var(--ok); }
 
   /* ev-row 可点击 (点开抽屉看完整 HTTP 流) */
   .ev-row { cursor: pointer; }
-  .ev-row:hover { background: #1a1a3a; }
-  .ev-row:focus { background: #1a1a3a; outline: 1px solid #00d4d4; outline-offset: -1px; }
+  .ev-row:hover { background: var(--bg-hover); }
+  .ev-row:focus { background: var(--bg-hover); outline: 1px solid var(--accent); outline-offset: -1px; }
 
   /* 事件详情 tabs (请求 / 响应 / SSE Stream / Headers) */
-  .ev-tabs { display: flex; gap: 0; border-bottom: 1px solid #2a2a4a; margin-bottom: 10px; }
+  .ev-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
   .ev-tab {
-    background: none; border: none; color: #888; padding: 6px 14px;
+    background: none; border: none; color: var(--text-faint); padding: 6px 14px;
     cursor: pointer; font-size: 12px; font-family: inherit;
     border-bottom: 2px solid transparent; transition: color 0.15s, border-color 0.15s;
   }
-  .ev-tab:hover { color: #ccc; }
-  .ev-tab.active { color: #00d4d4; border-bottom-color: #00d4d4; }
+  .ev-tab:hover { color: var(--text-secondary); }
+  .ev-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
   .ev-panel { display: none; }
   .ev-panel.active { display: block; }
   .ev-truncate-banner {
-    background: #3a2a1a; color: #ffaa00; padding: 4px 8px;
+    background: var(--bg-warn-tint); color: var(--warn); padding: 4px 8px;
     margin-bottom: 8px; border-radius: 3px; font-size: 11px;
   }
   .ev-raw {
     font-family: monospace; font-size: 11px; line-height: 1.45;
-    background: #0a0a1a; color: #ccc; padding: 10px; border-radius: 4px;
+    background: var(--bg-code); color: var(--text-secondary); padding: 10px; border-radius: 4px;
     white-space: pre-wrap; word-break: break-all; max-height: 60vh; overflow-y: auto;
   }
   .ev-headers { font-family: monospace; font-size: 11px; }
-  .ev-header-row { padding: 2px 0; border-bottom: 1px dotted #1a1a3a; }
+  .ev-header-row { padding: 2px 0; border-bottom: 1px dotted var(--bg-hover); }
   /* Chrome Network 风格 SSE: 默认折叠, 摘要行可点开; type 过滤 chip 在面板头. */
-  .sse-event { border-left: 3px solid #00d4d4; margin: 3px 0; background: #11112a; }
-  .sse-event.sse-err { border-left-color: #ff6666; }
-  .sse-event.sse-done { border-left-color: #666; opacity: 0.7; }
+  .sse-event { border-left: 3px solid var(--accent); margin: 3px 0; background: var(--bg-input); }
+  .sse-event.sse-err { border-left-color: var(--err-soft); }
+  .sse-event.sse-done { border-left-color: var(--text-dim); opacity: 0.7; }
   /* block 间隔耗时染色: >1s 橙 (轻度卡顿), >5s 红 (明显阻塞). 一眼定位 SSE 流慢点 */
-  .sse-event.sse-slow-warn { border-left-color: #ffaa00; background: rgba(255, 170, 0, 0.06); }
-  .sse-event.sse-slow-err  { border-left-color: #ff4444; background: rgba(255, 68, 68, 0.10); }
+  .sse-event.sse-slow-warn { border-left-color: var(--warn); background: rgba(255, 170, 0, 0.06); }
+  .sse-event.sse-slow-err  { border-left-color: var(--err); background: rgba(255, 68, 68, 0.10); }
   .sse-event-head { padding: 6px 8px; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 8px; font-size: 11px; }
-  .sse-event-head:hover { background: #1a1a3a; }
-  .sse-event-head::before { content: '▶'; color: #666; font-size: 9px; transition: transform 0.15s; display: inline-block; width: 10px; }
+  .sse-event-head:hover { background: var(--bg-hover); }
+  .sse-event-head::before { content: '▶'; color: var(--text-dim); font-size: 9px; transition: transform 0.15s; display: inline-block; width: 10px; }
   .sse-event.open .sse-event-head::before { transform: rotate(90deg); }
-  .sse-event-name { color: #00d4d4; font-weight: bold; }
+  .sse-event-name { color: var(--accent); font-weight: bold; }
   /* block 编号: 让用户一眼看出"哪两 block 之间空 20s". 用 #N/#M 直接对应日志/工具查询. */
-  .sse-event-idx { color: #888; font-size: 10px; min-width: 28px; font-family: monospace; }
+  .sse-event-idx { color: var(--text-faint); font-size: 10px; min-width: 28px; font-family: monospace; }
   /* 内容简述: block 类型关键字段 (tool 名 / delta type / stop_reason), 一行看清"是什么事件". */
-  .sse-event-hint { color: #ccc; font-size: 10px; font-style: italic; }
-  .sse-event-meta { color: #888; font-size: 10px; }
-  .sse-event-body { display: none; padding: 6px 8px 8px 26px; border-top: 1px dotted #2a2a4a; color: #ccc; white-space: pre-wrap; word-break: break-word; font-size: 11px; max-height: 50vh; overflow-y: auto; }
+  .sse-event-hint { color: var(--text-secondary); font-size: 10px; font-style: italic; }
+  .sse-event-meta { color: var(--text-faint); font-size: 10px; }
+  .sse-event-body { display: none; padding: 6px 8px 8px 26px; border-top: 1px dotted var(--border); color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; font-size: 11px; max-height: 50vh; overflow-y: auto; }
   .sse-event.open .sse-event-body { display: block; }
-  .sse-event-body .k { color: #88ccff; }
-  .sse-event-body .v-str { color: #00ff88; }
-  .sse-event-body .v-num { color: #ffaa33; }
-  .sse-event-body .v-bool { color: #ff66aa; }
-  .sse-event-body .v-null { color: #888; font-style: italic; }
-  .sse-filter-bar { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 0; border-bottom: 1px dotted #2a2a4a; margin-bottom: 6px; align-items: center; }
-  .sse-filter-chip { padding: 2px 8px; font-size: 10px; color: #888; border: 1px solid #2a2a4a; border-radius: 10px; cursor: pointer; background: #1a1a3a; }
-  .sse-filter-chip:hover { border-color: #00d4d4; }
-  .sse-filter-chip.active { color: #00d4d4; border-color: #00d4d4; }
+  .sse-event-body .k { color: var(--blue-light); }
+  .sse-event-body .v-str { color: var(--ok); }
+  .sse-event-body .v-num { color: var(--warn2); }
+  .sse-event-body .v-bool { color: var(--pink); }
+  .sse-event-body .v-null { color: var(--text-faint); font-style: italic; }
+  .sse-filter-bar { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 0; border-bottom: 1px dotted var(--border); margin-bottom: 6px; align-items: center; }
+  .sse-filter-chip { padding: 2px 8px; font-size: 10px; color: var(--text-faint); border: 1px solid var(--border); border-radius: 10px; cursor: pointer; background: var(--bg-hover); }
+  .sse-filter-chip:hover { border-color: var(--accent); }
+  .sse-filter-chip.active { color: var(--accent); border-color: var(--accent); }
   .sse-filter-chip[data-on="false"] { opacity: 0.4; }
-  /* SSE 搜索框: 复用 #11112a 底 / #3a3a5a 边 / #00d4d4 聚焦, 与 idleCfg input 统一. */
-  .sse-search-input { width: 150px; background: #11112a; color: #ccc; border: 1px solid #3a3a5a;
+  /* SSE 搜索框: 复用 var(--bg-input) 底 / var(--border-strong) 边 / var(--accent) 聚焦, 与 idleCfg input 统一. */
+  .sse-search-input { width: 150px; background: var(--bg-input); color: var(--text-secondary); border: 1px solid var(--border-strong);
     border-radius: 3px; padding: 2px 6px; font-size: 10px; font-family: inherit; }
-  .sse-search-input:focus { outline: none; border-color: #00d4d4; color: #00d4d4; }
-  .sse-search-input::placeholder { color: #555; }
-  .sse-search-count { color: #888; font-size: 10px; min-width: 52px; text-align: center; font-family: monospace; }
+  .sse-search-input:focus { outline: none; border-color: var(--accent); color: var(--accent); }
+  .sse-search-input::placeholder { color: var(--text-muted); }
+  .sse-search-count { color: var(--text-faint); font-size: 10px; min-width: 52px; text-align: center; font-family: monospace; }
   /* 搜索栏独立行: 实时输出框下方 / block 列表上方. 搜索框固定宽, 全部展开/折叠 margin-left:auto 推右. */
-  .sse-search-bar { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px dotted #2a2a4a; margin-bottom: 6px; }
+  .sse-search-bar { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px dotted var(--border); margin-bottom: 6px; }
   /* 命中染色: 限定 .sse-event-head, 不覆盖 err/slow 的 border-left. hit=微橙底; current=更亮+橙outline. */
-  .sse-event.sse-search-hit .sse-event-head { background: #3a2a14; }
-  .sse-event.sse-search-current .sse-event-head { background: #5a4017; box-shadow: inset 0 0 0 1px #ffaa00; }
-  .sse-summary { color: #88ccff; font-size: 11px; margin-bottom: 4px; }
-  .sse-truncate-banner { background: #3a2a1a; border-left: 3px solid #ffaa33; padding: 6px 8px; margin-bottom: 6px; color: #ffaa33; font-size: 11px; }
-  .ev-header-k { color: #88ccff; }
-  .ev-header-v { color: #ccc; word-break: break-all; }
+  .sse-event.sse-search-hit .sse-event-head { background: var(--bg-search-hit); }
+  .sse-event.sse-search-current .sse-event-head { background: var(--bg-search-current); box-shadow: inset 0 0 0 1px var(--warn); }
+  .sse-summary { color: var(--blue-light); font-size: 11px; margin-bottom: 4px; }
+  .sse-truncate-banner { background: var(--bg-warn-tint); border-left: 3px solid var(--warn2); padding: 6px 8px; margin-bottom: 6px; color: var(--warn2); font-size: 11px; }
+  .ev-header-k { color: var(--blue-light); }
+  .ev-header-v { color: var(--text-secondary); word-break: break-all; }
 
   /* chip 组: 流请求 / 异常事件 各自一组, 同时常驻 (左右分栏, 不再 hidden 切换) */
   .event-chips-group { display: inline-flex; align-items: center; gap: 4px; }
@@ -315,62 +356,62 @@
   /* 流请求行: ts / status / method / url / agent / 首字 / total / size */
   .req-row {
     display: flex; align-items: center; gap: 8px; padding: 4px 8px;
-    border-bottom: 1px dotted #1a1a3a; font-size: 11px; cursor: pointer;
+    border-bottom: 1px dotted var(--bg-hover); font-size: 11px; cursor: pointer;
     border-left: 3px solid transparent;
   }
-  .req-row:hover { background: #1a1a3a; }
-  .req-row:focus { background: #1a1a3a; outline: 1px solid #00d4d4; outline-offset: -1px; }
-  .req-row-ok { border-left-color: #00ff88; }
-  .req-row-err { border-left-color: #ff6666; }
+  .req-row:hover { background: var(--bg-hover); }
+  .req-row:focus { background: var(--bg-hover); outline: 1px solid var(--accent); outline-offset: -1px; }
+  .req-row-ok { border-left-color: var(--ok); }
+  .req-row-err { border-left-color: var(--err-soft); }
   /* pending (进行中): SSE 流式中段 (status=200 但字节还在输出) 也走这里, 不能用 data-status="0"
    * (SSE 响应头一到就是 200, 匹配不到). 用 classifyRequest 产的 class 统一驱动. */
-  .req-row-pending { border-left-color: #ffaa33; opacity: 0.75; }
-  .req-row-pending .req-status { color: #ffaa33; }
-  /* pending 子分色 (think/text): think 紫 (与 agent 行 state-stream-think #aa88ff 同源),
+  .req-row-pending { border-left-color: var(--warn2); opacity: 0.75; }
+  .req-row-pending .req-status { color: var(--warn2); }
+  /* pending 子分色 (think/text): think 紫 (与 agent 行 state-stream-think var(--think) 同源),
    * text / 等首字 (无 phase) → 默认橙. 完成态 (ok/err) 不受影响. */
-  .req-row-pending.req-phase-think { border-left-color: #aa88ff; opacity: 0.9; }
-  .req-row-pending.req-phase-think .req-status { color: #aa88ff; }
-  .req-ts { color: #666; min-width: 56px; }
-  .req-status { color: #88ccff; font-weight: bold; min-width: 32px; }
-  .req-row-err .req-status { color: #ff6666; }
-  .req-method { color: #00d4d4; min-width: 44px; }
-  .req-url { color: #ccc; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-  .req-agent { color: #888; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .req-ttfb { color: #ccc; min-width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
-  .req-total { color: #ccc; min-width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
+  .req-row-pending.req-phase-think { border-left-color: var(--think); opacity: 0.9; }
+  .req-row-pending.req-phase-think .req-status { color: var(--think); }
+  .req-ts { color: var(--text-dim); min-width: 56px; }
+  .req-status { color: var(--blue-light); font-weight: bold; min-width: 32px; }
+  .req-row-err .req-status { color: var(--err-soft); }
+  .req-method { color: var(--accent); min-width: 44px; }
+  .req-url { color: var(--text-secondary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .req-agent { color: var(--text-faint); max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .req-ttfb { color: var(--text-secondary); min-width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
+  .req-total { color: var(--text-secondary); min-width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
   /* 流进行中: 总耗时是估算, 单一橙色提示 (覆盖分级色). */
-  .req-total.live { color: #ffaa00; }
+  .req-total.live { color: var(--warn); }
   /* 结束态按总耗时分级着色: 一眼看出"这次请求快/慢/很慢/异常".
    * 阈值 (ms):  < 1s 一律绿 (毫秒级响应), 1s/10s/30s/5m 四档分级. */
-  .req-total.f-fast   { color: #00ff88; }  /* 绿:  < 1s         毫秒级 */
-  .req-total.f-ok     { color: #ccc;    }  /* 默认: 1s ~ 10s     正常 */
-  .req-total.f-warn   { color: #ffaa00; }  /* 黄:  10s ~ 30s    偏慢 */
-  .req-total.f-slow   { color: #ff8833; }  /* 橙:  30s ~ 5m     很慢 */
-  .req-total.f-error  { color: #ff4444; }  /* 红:  > 5m         异常 */
-  .req-size { color: #666; min-width: 56px; text-align: right; }
+  .req-total.f-fast   { color: var(--ok); }  /* 绿:  < 1s         毫秒级 */
+  .req-total.f-ok     { color: var(--text-secondary);    }  /* 默认: 1s ~ 10s     正常 */
+  .req-total.f-warn   { color: var(--warn); }  /* 黄:  10s ~ 30s    偏慢 */
+  .req-total.f-slow   { color: var(--slow-orange); }  /* 橙:  30s ~ 5m     很慢 */
+  .req-total.f-error  { color: var(--err); }  /* 红:  > 5m         异常 */
+  .req-size { color: var(--text-dim); min-width: 56px; text-align: right; }
   /* 流请求列表列头: 与 req-row flex 列宽对齐, 默认隐藏 (切到 requests tab 才显) */
   .req-col-header {
     display: flex; align-items: center; gap: 8px; padding: 4px 8px;
-    font-size: 10px; color: #556; text-transform: uppercase; letter-spacing: 0.5px;
-    border-bottom: 1px dotted #2a2a4a;
+    font-size: 10px; color: var(--text-header); text-transform: uppercase; letter-spacing: 0.5px;
+    border-bottom: 1px dotted var(--border);
   }
   .req-col-header .col-ttfb { min-width: 52px; text-align: right; }
   .req-col-header .col-total { min-width: 52px; text-align: right; }
   .req-col-header .col-size { min-width: 56px; text-align: right; }
 
   /* 实时 prompt 卡片 */
-  .tl-prompt { border-left-color: #00d4d4; }
-  .tl-prompt .tl-label { color: #00d4d4; }
+  .tl-prompt { border-left-color: var(--accent); }
+  .tl-prompt .tl-label { color: var(--accent); }
   /* 请求列表默认收起; 点 head 展开. body 内 system 默认展开、message 默认收起 (见 foldBlock) */
   .tl-prompt > .tl-head { cursor: pointer; user-select: none; }
-  .tl-prompt > .tl-head .tl-label::before { content: '▸ '; color: #888; }
+  .tl-prompt > .tl-head .tl-label::before { content: '▸ '; color: var(--text-faint); }
   .tl-prompt.open > .tl-head .tl-label::before { content: '▾ '; }
   .tl-prompt > .tl-body { display: none; }
   .tl-prompt.open > .tl-body { display: block; }
-  .tl-sub { margin: 4px 0; padding: 4px 6px; background: #11112a; border-radius: 3px; }
-  .tl-sub-label { display: block; font-size: 10px; color: #888; margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.5px; }
-  .tl-sub-sys .tl-sub-label { color: #aa88ff; }
-  .tl-sub-msg .tl-sub-label { color: #6688cc; }
+  .tl-sub { margin: 4px 0; padding: 4px 6px; background: var(--bg-input); border-radius: 3px; }
+  .tl-sub-label { display: block; font-size: 10px; color: var(--text-faint); margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .tl-sub-sys .tl-sub-label { color: var(--think); }
+  .tl-sub-msg .tl-sub-label { color: var(--blue-dim); }
   /* user/assistant 收起态: label + 预览 + 展开按钮 同一单行, 预览溢出省略. 展开后 full 多行自动撑开. */
   .tl-sub-msg { display: flex; align-items: center; gap: 6px; }
   .tl-sub-msg .tl-sub-label { display: inline; flex: none; margin: 0; }
@@ -381,8 +422,8 @@
 
   /* 异常事件流带 — 顶部状态栏下, 列头上. 固定高度, 新条目从下往上滚 */
   .event-bar {
-    border-bottom: 1px solid #2a2a4a;
-    background: #14142a;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-deep);
     display: flex;
     flex-direction: column;
   }
@@ -391,17 +432,17 @@
   .event-panel {
     flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; position: relative;
   }
-  .event-panel + .event-panel { border-left: 1px solid #2a2a4a; }
+  .event-panel + .event-panel { border-left: 1px solid var(--border); }
   .event-bar-head {
     display: flex;
     align-items: center;
     gap: 10px;
     padding: 5px 16px;
-    border-bottom: 1px solid #1a1a3a;
+    border-bottom: 1px solid var(--bg-hover);
     font-size: 11px;
     flex-shrink: 0;
   }
-  .event-bar-title { color: #00d4d4; font-weight: bold; margin-right: 4px; }
+  .event-bar-title { color: var(--accent); font-weight: bold; margin-right: 4px; }
   .event-chip {
     display: inline-flex;
     align-items: center;
@@ -410,26 +451,26 @@
     border-radius: 11px;
     cursor: pointer;
     user-select: none;
-    background: #1a1a3a;
-    border: 1px solid #2a2a4a;
-    color: #888;
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    color: var(--text-faint);
     transition: opacity 0.15s, border-color 0.15s;
   }
-  .event-chip[data-on="true"] { color: #ddd; border-color: #3a3a5a; }
+  .event-chip[data-on="true"] { color: var(--chip-on); border-color: var(--border-strong); }
   .event-chip[data-on="false"] { opacity: 0.4; }
-  .event-chip:hover { border-color: #00d4d4; }
+  .event-chip:hover { border-color: var(--accent); }
   .event-chip .dot {
     width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
   }
-  .event-chip[data-sev="error"]  .dot { background: #ff4444; }
-  .event-chip[data-sev="warn"]   .dot { background: #ffaa00; }
-  .event-chip[data-sev="notice"] .dot { background: #dddd44; }
-  .event-chip[data-sev="info"]   .dot { background: #00cc55; }
-  .event-chip b { color: #fff; font-weight: bold; min-width: 12px; text-align: right; }
+  .event-chip[data-sev="error"]  .dot { background: var(--err); }
+  .event-chip[data-sev="warn"]   .dot { background: var(--warn); }
+  .event-chip[data-sev="notice"] .dot { background: var(--notice); }
+  .event-chip[data-sev="info"]   .dot { background: var(--ok-chip); }
+  .event-chip b { color: var(--chip-on); font-weight: bold; min-width: 12px; text-align: right; }
   .event-bar-btn {
-    background: #2a2a4a;
-    color: #00d4d4;
-    border: 1px solid #3a3a5a;
+    background: var(--border);
+    color: var(--accent);
+    border: 1px solid var(--border-strong);
     border-radius: 3px;
     padding: 1px 8px;
     font-size: 11px;
@@ -438,7 +479,7 @@
     margin-left: auto;
   }
   .event-bar-btn:first-of-type { margin-left: auto; }
-  .event-bar-btn:hover { background: #3a3a5a; }
+  .event-bar-btn:hover { background: var(--border-strong); }
   .event-bar-body {
     height: 0;
     overflow-y: auto;
@@ -460,7 +501,7 @@
     height: 6px;
     cursor: ns-resize;
     background: transparent;
-    border-top: 1px solid #1a1a3a;
+    border-top: 1px solid var(--bg-hover);
     flex-shrink: 0;
     user-select: none;
     position: relative;
@@ -474,11 +515,11 @@
     width: 32px;
     height: 3px;
     margin-left: -16px;
-    background: #2a2a4a;
+    background: var(--border);
     border-radius: 2px;
     transition: background 0.15s;
   }
-  .event-bar-resizer:hover::after { background: #00d4d4; }
+  .event-bar-resizer:hover::after { background: var(--accent); }
   /* 拖动时禁用选中, 鼠标变 col-resize 全局 */
   body.dragging-resizer { cursor: ns-resize; user-select: none; }
     overflow-y: auto;
@@ -489,7 +530,7 @@
     grid-template-columns: 56px 18px 110px 130px 1fr 40px;
     align-items: center;
     padding: 1px 0;
-    border-bottom: 1px dotted #1a1a3a;
+    border-bottom: 1px dotted var(--bg-hover);
     animation: slideIn 0.2s ease-out;
     gap: 4px;
   }
@@ -497,18 +538,18 @@
     from { opacity: 0; transform: translateY(6px); }
     to   { opacity: 1; transform: translateY(0); }
   }
-  .ev-ts   { color: #556; font-family: monospace; }
+  .ev-ts   { color: var(--text-header); font-family: monospace; }
   .ev-icon { font-size: 10px; text-align: center; }
-  .ev-agent { color: #888; font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ev-type { color: #00d4d4; font-family: monospace; }
-  .ev-msg  { color: #ccc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ev-count{ color: #ffaa00; font-weight: bold; text-align: right; }
-  .ev-row-error  .ev-msg { color: #ff7777; }
-  .ev-row-warn   .ev-msg { color: #ffcc66; }
-  .ev-row-notice .ev-msg { color: #ddd888; }
-  .ev-row-info   .ev-msg { color: #88cc88; }
-  .ev-row-error  { border-bottom-color: #3a1a1a; }
-  .ev-row-warn   { border-bottom-color: #3a2a1a; }
+  .ev-agent { color: var(--text-faint); font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ev-type { color: var(--accent); font-family: monospace; }
+  .ev-msg  { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ev-count{ color: var(--warn); font-weight: bold; text-align: right; }
+  .ev-row-error  .ev-msg { color: var(--err-msg); }
+  .ev-row-warn   .ev-msg { color: var(--warn-soft); }
+  .ev-row-notice .ev-msg { color: var(--notice-msg); }
+  .ev-row-info   .ev-msg { color: var(--green-msg); }
+  .ev-row-error  { border-bottom-color: var(--border-err); }
+  .ev-row-warn   { border-bottom-color: var(--bg-warn-tint); }
 
   /* 跳到最新浮标: 用户反向滚动时浮在右下, 点击滚到底 */
   .ev-jump {
@@ -518,8 +559,8 @@
     padding: 2px 10px;
     border-radius: 11px;
     background: rgba(0, 212, 212, 0.18);
-    border: 1px solid #00d4d4;
-    color: #00d4d4;
+    border: 1px solid var(--accent);
+    color: var(--accent);
     font-size: 11px;
     font-weight: bold;
     cursor: pointer;
@@ -529,13 +570,13 @@
   .ev-jump:hover { background: rgba(0, 212, 212, 0.32); }
 
   /* 实时输出区: thinking + text delta 持续追加, 在 SSE block 列表上方 */
-  .sse-live { background: #0a0a1a; border: 1px solid #2a2a4a; border-radius: 4px; margin-bottom: 8px; padding: 8px; }
-  .sse-live-head { color: #888; font-size: 11px; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
-  .sse-live-body { font-size: 12px; line-height: 1.6; max-height: 30vh; overflow-y: auto; white-space: pre-wrap; word-break: break-word; color: #ccc; font-family: inherit; }
-  .sse-live-foot { color: #666; font-size: 10px; margin-top: 4px; text-align: right; }
-  .lv-think { color: #aa88ff; }
-  .lv-text  { color: #00ff88; }
-  .sse-live-empty { color: #555; font-style: italic; }
+  .sse-live { background: var(--bg-code); border: 1px solid var(--border); border-radius: 4px; margin-bottom: 8px; padding: 8px; }
+  .sse-live-head { color: var(--text-faint); font-size: 11px; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .sse-live-body { font-size: 12px; line-height: 1.6; max-height: 30vh; overflow-y: auto; white-space: pre-wrap; word-break: break-word; color: var(--text-secondary); font-family: inherit; }
+  .sse-live-foot { color: var(--text-dim); font-size: 10px; margin-top: 4px; text-align: right; }
+  .lv-think { color: var(--think); }
+  .lv-text  { color: var(--ok); }
+  .sse-live-empty { color: var(--text-muted); font-style: italic; }
 </style>
 </head>
 <body>
@@ -624,6 +665,17 @@
   </div>
 </div>
 <script>
+// 主题: 首帧取 URL ?theme= (由宿主 iframe src 带入), 之后宿主切换实时 postMessage 同步.
+function applyMonitorTheme(t) {
+  if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+}
+applyMonitorTheme(new URLSearchParams(location.search).get('theme'));
+window.addEventListener('message', (e) => {
+  if (e.source !== window.parent) return;
+  const d = e.data;
+  if (d && d.type === 'theme') applyMonitorTheme(d.theme);
+});
+
 const POLL_MS = 200;
 
 function formatTokens(n) {
@@ -675,7 +727,7 @@ function stateHtml(state, ms, streamTokens, streamPhase) {
   const cls = state === 'STREAM'
     ? (streamPhase === 'think' ? 'state state-stream-think' : 'state state-stream-text')
     : 'state state-' + state.toLowerCase().replace('_', '-');
-  const tok = (state === 'STREAM' && streamTokens > 0) ? ` <span style="color:#00d4d4">${formatTokens(streamTokens)}</span>` : '';
+  const tok = (state === 'STREAM' && streamTokens > 0) ? ` <span style="color:var(--accent)">${formatTokens(streamTokens)}</span>` : '';
   return `<span class="${cls}">${label} ${dur}${tok}</span>`;
 }
 
@@ -683,7 +735,7 @@ function ioHtml(lastIn, tps, estimated) {
   const parts = [];
   if (lastIn > 0) parts.push(`<span class="io-in">↑${formatTokens(lastIn)}</span>`);
   if (tps > 0) parts.push(`<span class="io-out">↓${estimated ? '~' : ''}${tps}</span>`);
-  return parts.join(' ') || '<span style="color:#333">-</span>';
+  return parts.join(' ') || '<span style="color:var(--text-extra-faint)">-</span>';
 }
 
 // 时间格式化: 入参 epoch ms 或 ISO 字符串 → 本地时区 HH:MM:SS.
@@ -1332,21 +1384,21 @@ function installCopyTraceButton(actionsEl, cid) {
   const btn = document.createElement('button');
   btn.className = 'copy-curl-btn';
   btn.style.fontFamily = 'monospace';
-  btn.innerHTML = '<span style="color:#888;">trace:</span> ' + esc(short);
+  btn.innerHTML = '<span style="color:var(--text-faint);">trace:</span> ' + esc(short);
   btn.title = '点击复制完整 trace-id: ' + cid;
   btn.addEventListener('click', async () => {
     try {
       await copyText(cid);
       btn.classList.add('copied');
       const orig = btn.innerHTML;
-      btn.innerHTML = '<span style="color:#00ff88;">✓</span> 已复制';
+      btn.innerHTML = '<span style="color:var(--ok);">✓</span> 已复制';
       setTimeout(() => {
         btn.classList.remove('copied');
         btn.innerHTML = orig;
       }, 1200);
     } catch (e) {
       btn.textContent = '复制失败';
-      setTimeout(() => { btn.innerHTML = '<span style="color:#888;">trace:</span> ' + esc(short); }, 1500);
+      setTimeout(() => { btn.innerHTML = '<span style="color:var(--text-faint);">trace:</span> ' + esc(short); }, 1500);
     }
   });
   actionsEl.insertBefore(btn, actionsEl.firstChild);
@@ -1413,7 +1465,7 @@ function renderRespPanel(resp) {
     ? '<div class="drawer-empty">SSE 流 (响应字节在 "SSE Stream" tab)</div>'
     : '<div class="ev-raw">' + esc(resp.body) + '</div>';
   return banner +
-    '<div style="margin-bottom:8px;color:#88ccff;">HTTP ' + esc(String(resp.statusCode || '?')) + '</div>' +
+    '<div style="margin-bottom:8px;color:var(--blue-light);">HTTP ' + esc(String(resp.statusCode || '?')) + '</div>' +
     bodyHtml;
 }
 
@@ -1426,8 +1478,8 @@ function renderDetailsPanel(details) {
   }
   return details.map(d => {
     const ts = d.ts ? new Date(d.ts).toISOString().slice(11, 19) : '??:??:??';
-    const sevColor = d.severity === 'error' ? '#ff6b6b'
-      : (d.severity === 'warn' ? '#ffa500' : '#88ccff');
+    const sevColor = d.severity === 'error' ? 'var(--sev-err)'
+      : (d.severity === 'warn' ? 'var(--warn-orange)' : 'var(--blue-light)');
     let bodyHtml = '';
     if (d.detail && typeof d.detail === 'object' && Object.keys(d.detail).length > 0) {
       bodyHtml = '<div class="sse-event-body" style="display:block;padding-left:0;">' +
@@ -1439,7 +1491,7 @@ function renderDetailsPanel(details) {
         '<span class="sse-event-name" style="color:' + sevColor + ';">' + esc(d.type) + '</span>' +
         '<span class="sse-event-meta">' + esc(ts) + ' · ' + esc(d.severity || '') + '</span>' +
         '</div>' +
-      '<div style="padding:4px 0;color:#ccc;font-size:11px;">' + esc(d.message || '') + '</div>' +
+      '<div style="padding:4px 0;color:var(--text-secondary);font-size:11px;">' + esc(d.message || '') + '</div>' +
       bodyHtml +
       '</div>';
   }).join('');
@@ -1485,8 +1537,8 @@ function renderSsePanel(sse) {
     return { text: formatDelta(dt), ms: dt };
   }
   function slowClass(ms) {
-    if (ms > 5000) return { cls: 'sse-slow-err',  color: '#ff6644' };
-    if (ms > 1000) return { cls: 'sse-slow-warn', color: '#ffaa00' };
+    if (ms > 5000) return { cls: 'sse-slow-err',  color: 'var(--orange-red)' };
+    if (ms > 1000) return { cls: 'sse-slow-warn', color: 'var(--warn)' };
     return { cls: '', color: '' };
   }
   // 每个 block 的累计 elapsed (从 blockTs[0] 到该 block 的墙钟时长) — 让用户看清"哪段是空档".
@@ -1513,9 +1565,9 @@ function renderSsePanel(sse) {
     }
     const totalElapsed = blockTs[lastFullIdx].ts - blockTs[0].ts;  // 真实首→末
     const dataFlow = Math.max(0, sumDelta - silent);  // 数据流动 = sumDelta - silent
-    summaryExtras = ' · 数据流动 <span style="color:#88ccff;">' + esc(formatDelta(dataFlow)) + '</span>' +
+    summaryExtras = ' · 数据流动 <span style="color:var(--blue-light);">' + esc(formatDelta(dataFlow)) + '</span>' +
       ' · 总跨度 ' + esc(formatDelta(totalElapsed)) +
-      (silent > 500 ? ' · 静默 <span style="color:#ffaa00;">' + esc(formatDelta(silent)) + '</span>' : '');
+      (silent > 500 ? ' · 静默 <span style="color:var(--warn);">' + esc(formatDelta(silent)) + '</span>' : '');
   }
   const summary = '<div class="sse-summary">' +
     'SSE 事件块: ' + parsed.length + ' · 总字节: ' + esc(formatBytes(sse.bytesSize)) +
@@ -1525,7 +1577,7 @@ function renderSsePanel(sse) {
 
   // 类型过滤 chip (默认全开, 点击切换) — 展开按钮移到搜索行, 这行只留过滤
   const filterBar = '<div class="sse-filter-bar">' +
-    '<span style="color:#888;font-size:10px;">类型过滤:</span>' +
+    '<span style="color:var(--text-faint);font-size:10px;">类型过滤:</span>' +
     types.map(t => '<span class="sse-filter-chip active" data-type="' + esc(t) + '" data-on="true">' +
       esc(t) + ' (' + typeCounts[t] + ')</span>').join('') +
     '</div>';
@@ -1555,7 +1607,7 @@ function renderSsePanel(sse) {
     // 累计 elapsed: 从首块到该 block 的真实墙钟时长. 用于定位空档 (例如 16s 总耗时里
     //   跳到 elapsed=15s 才来下一段, 一眼看出 middle 14s 全是上游 silent).
     const e = elapsedMs(idx);
-    const elapsedPrefix = (idx > lastFullIdx) ? '' : '<span style="color:#88ccff;">elapsed ' + esc(formatDelta(e)) + '</span> · ';
+    const elapsedPrefix = (idx > lastFullIdx) ? '' : '<span style="color:var(--blue-light);">elapsed ' + esc(formatDelta(e)) + '</span> · ';
     // 摘要: 距上一个 block 耗时 + 字节 (data 是 '[DONE]' / 空��仅显示耗时)
     let metaText;
     if (ev.data === '[DONE]') metaText = 'DONE';
@@ -1617,7 +1669,7 @@ function renderSsePanel(sse) {
   ).join('') + '</style>';
   const html = banner + filterStyle + summary + filterBar + live + searchBar +
     '<div id="sseEventList">' + list + '</div>' +
-    '<details style="margin-top:12px;"><summary style="cursor:pointer;color:#888;font-size:11px;">查看原始字节流</summary>' +
+    '<details style="margin-top:12px;"><summary style="cursor:pointer;color:var(--text-faint);font-size:11px;">查看原始字节流</summary>' +
     '<div class="ev-raw" style="margin-top:6px;">' + esc(raw) + '</div></details>';
   return { html, blocks: parsed };
 }
@@ -1774,7 +1826,7 @@ function renderSseJson(v, depth) {
   if (typeof v === 'number') return '<span class="v-num">' + v + '</span>';
   if (typeof v === 'string') {
     // 长字符串 (>80) 折叠, 避免一个 event 撑爆屏幕
-    if (v.length > 80) return '<span class="v-str">"' + esc(v.slice(0, 80)) + '"</span> <span style="color:#666;">… +' + (v.length - 80) + ' chars</span>';
+    if (v.length > 80) return '<span class="v-str">"' + esc(v.slice(0, 80)) + '"</span> <span style="color:var(--text-dim);">… +' + (v.length - 80) + ' chars</span>';
     return '<span class="v-str">"' + esc(v) + '"</span>';
   }
   if (Array.isArray(v)) {
@@ -1792,13 +1844,13 @@ function renderSseJson(v, depth) {
 }
 
 function renderHeadersPanel(data) {
-  let html = '<div style="color:#00d4d4;margin-bottom:4px;">▸ Request Headers</div>';
+  let html = '<div style="color:var(--accent);margin-bottom:4px;">▸ Request Headers</div>';
   html += renderHeadersList(data.req && data.req.headers);
   if (data.resp) {
-    html += '<div style="color:#00d4d4;margin:12px 0 4px;">▸ Response Headers</div>';
+    html += '<div style="color:var(--accent);margin:12px 0 4px;">▸ Response Headers</div>';
     html += renderHeadersList(data.resp.headers);
   } else {
-    html += '<div style="color:#00d4d4;margin:12px 0 4px;">▸ Response Headers</div>';
+    html += '<div style="color:var(--accent);margin:12px 0 4px;">▸ Response Headers</div>';
     html += '<div class="drawer-empty">SSE 流 (无独立响应头 / 含在 response headers 里)</div>';
   }
   return html || '<div class="drawer-empty">无 headers</div>';

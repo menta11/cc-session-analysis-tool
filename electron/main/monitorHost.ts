@@ -12,7 +12,7 @@ import { createRequire } from 'node:module'
 import type monitorProxyType from './monitor/proxy.js'
 
 const monitorProxy: typeof monitorProxyType = createRequire(__filename)('./monitor/proxy.js')
-const { applyStartupPreference, getPort, restoreBaseUrlIfStale, startProxy, stopProxy } = monitorProxy
+const { getPort, restoreBaseUrlIfStale, startProxy, stopProxy } = monitorProxy
 
 const IS_MAC = process.platform === 'darwin'
 const PORT = getPort()
@@ -243,9 +243,9 @@ export function initMonitor(
     } catch (e) {
       console.error('[monitor] startup self-heal failed:', e)
     }
-    const ok = await startProxyIfDown()
-    // 重开监控 (上次退出时已自动关), 除非用户显式关闭过; 失败仅记日志, dashboard 显示 OFF 可手动开
-    if (ok) applyStartupPreference()
+    // 只起代理不自动开监控: 监控保持 OFF, 由用户在 dashboard 或托盘手动开启 (不静默改写
+    // 用户的 ANTHROPIC_BASE_URL). 出错仅记日志, dashboard 显示 OFF 可手动开.
+    await startProxyIfDown()
     createTray()
   })()
 

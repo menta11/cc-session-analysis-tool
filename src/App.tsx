@@ -86,7 +86,7 @@ export function App(): JSX.Element {
       </div>
       {monitorMounted ? (
         <div style={{ ...pageHostStyle, display: page === 'monitor' ? 'flex' : 'none' }}>
-          <MonitorPage />
+          <MonitorPage theme={theme} />
         </div>
       ) : null}
 
