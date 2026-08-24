@@ -1,0 +1,2473 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>cc-monitor</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    color: #e0e0e0;
+    font-family: 'Cascadia Code', 'Consolas', 'Courier New', monospace;
+    font-size: 13px;
+    overflow-y: auto;
+    padding: 0;
+  }
+  .header {
+    padding: 12px 16px 8px;
+    border-bottom: 1px solid #2a2a4a;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .header h1 {
+    font-size: 15px;
+    color: #00d4d4;
+    font-weight: bold;
+  }
+  .header .ts {
+    color: #666;
+    font-size: 12px;
+    margin-left: auto;
+  }
+  .status-bar {
+    padding: 6px 16px;
+    display: flex;
+    gap: 24px;
+    align-items: center;
+    border-bottom: 1px solid #2a2a4a;
+    font-size: 12px;
+  }
+  .status-bar .label { color: #888; }
+  .status-bar .value { font-weight: bold; }
+  /* 状态栏可点配置项: hover 提示可改, click 变 input */
+  .config-link {
+    color: #00d4d4; cursor: pointer; border-radius: 3px; padding: 0 4px;
+    border: 1px solid transparent;
+  }
+  .config-link:hover { background: #2a2a4a; border-color: #3a3a5a; }
+  .config-link input {
+    width: 56px; background: #11112a; color: #00d4d4; border: 1px solid #3a3a5a;
+    border-radius: 3px; padding: 1px 4px; font: inherit; font-weight: bold;
+  }
+  .active { color: #00ff88; }
+  .idle { color: #888; }
+  .monitor-toggle { display: flex; align-items: center; gap: 8px; }
+  .switch {
+    width: 44px;
+    height: 22px;
+    background: #3a3a5a;
+    border: 1px solid #4a4a6a;
+    border-radius: 11px;
+    position: relative;
+    cursor: pointer;
+    padding: 0;
+    transition: background 0.2s, border-color 0.2s;
+    flex-shrink: 0;
+  }
+  .switch.on { background: #00cc55; border-color: #00cc55; }
+  .switch:hover:not(:disabled) { opacity: 0.88; }
+  .switch:disabled { opacity: 0.5; cursor: wait; }
+  .switch-knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    background: #fff;
+    border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+    transition: transform 0.2s;
+    pointer-events: none;
+  }
+  .switch.on .switch-knob { transform: translateX(22px); }
+  .switch-text { font-size: 12px; font-weight: bold; min-width: 48px; }
+  .switch-text.on { color: #00ff88; }
+  .switch-text.off { color: #666; }
+
+  .col-header {
+    padding: 6px 16px;
+    display: grid;
+    grid-template-columns: 120px 100px calc(80px + 3ch) calc(160px + 10ch) 84px;
+    color: #556;
+    font-size: 11px;
+    border-bottom: 1px solid #2a2a4a;
+    text-transform: uppercase;
+  }
+
+  .agent-row {
+    padding: 4px 16px;
+    display: grid;
+    grid-template-columns: 120px 100px calc(80px + 3ch) calc(160px + 10ch) 84px;
+    align-items: center;
+    border-bottom: 1px solid #1a1a2e;
+  }
+  /* State 列整体右移一个单词（5ch = monospace 下一单词宽） */
+  .col-header > :nth-child(4),
+  .agent-row > :nth-child(4) { padding-left: 5ch; }
+  .agent-row.main { font-weight: bold; }
+  .agent-row.sub {
+    font-weight: normal;
+    padding-left: 32px;
+  }
+  .agent-row.sub::before {
+    content: '└';
+    color: #444;
+    position: absolute;
+    margin-left: -12px;
+  }
+  .agent-row.orphan-header {
+    padding: 8px 16px 4px;
+    display: block;
+    color: #555;
+    font-style: italic;
+    font-size: 12px;
+    font-weight: normal;
+  }
+
+  .agent-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .agent-row:hover .agent-name { text-decoration: underline; }
+  .bar {
+    display: inline-block;
+    font-family: monospace;
+    letter-spacing: -1px;
+  }
+  .bar-char { color: #333; }
+  .io { font-size: 12px; white-space: nowrap; }
+  .io-in { color: #4488ff; font-weight: bold; }
+  .io-out { color: #ffaa33; font-weight: bold; }
+
+  .state { font-size: 12px; font-weight: bold; white-space: nowrap; }
+  .state-stream { color: #00ff88; }
+  .state-stream-think { color: #aa88ff; }
+  .state-stream-text { color: #00ff88; }
+  .state-waiting { color: #00aaff; }
+  .state-work { color: #ffaa00; }
+  .state-sse-stuck { color: #ff4444; animation: blink 0.8s infinite; }
+  .state-disconnected { color: #ff6644; animation: blink 1.5s infinite; }
+  .state-idle { color: #666; }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  .agent-row.killable { background: rgba(255, 68, 68, 0.08); }
+  /* 操作列按钮基类: 统一结构 (尺寸/圆角/cursor/字体). 新按钮 = .op-btn + 颜色变体 */
+  .op-btn {
+    padding: 2px 8px; border-radius: 3px; cursor: pointer;
+    font-size: 11px; font-family: inherit; line-height: 1;
+    margin-right: 3px; border: 1px solid;
+  }
+  .op-btn--tl { background: #2a2a4a; color: #00d4d4; border-color: #3a3a5a; }
+  .op-btn--tl:hover { background: #3a3a5a; }
+  .op-btn--kill { background: #ff4444; color: #fff; border-color: #ff4444; font-weight: bold; }
+  .op-btn--kill:hover:not(:disabled) { background: #ff6666; border-color: #ff6666; }
+  .op-btn--kill:disabled { opacity: 0.5; cursor: wait; }
+  .agent-row.killable .op-btn--kill { animation: blink 0.8s infinite; }
+
+  .no-agents {
+    padding: 40px 16px;
+    text-align: center;
+    color: #555;
+  }
+  .no-agents .hint {
+    margin-top: 8px;
+    font-size: 11px;
+    color: #444;
+  }
+
+  /* Session 时间线抽屉 */
+  #sessionDrawer {
+    position: fixed; top: 0; right: 0; height: 100vh; width: 56%;
+    background: #14142a; border-left: 1px solid #2a2a4a;
+    transform: translateX(100%); transition: transform 0.2s ease;
+    display: flex; flex-direction: column; z-index: 100;
+    box-shadow: -4px 0 20px rgba(0,0,0,0.5);
+  }
+  #sessionDrawer.open { transform: translateX(0); }
+  .drawer-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border-bottom: 1px solid #2a2a4a;
+    font-weight: bold; color: #00d4d4; font-size: 13px;
+  }
+  #drawerClose {
+    background: none; border: none; color: #888; font-size: 20px;
+    cursor: pointer; line-height: 1; padding: 0 4px;
+  }
+  #drawerClose:hover { color: #fff; }
+  .drawer-actions { display: flex; align-items: center; gap: 6px; }
+  .copy-curl-btn {
+    background: #1a1a2e; border: 1px solid #2a4a4a; color: #00d4d4;
+    font-family: inherit; font-size: 11px; padding: 3px 10px;
+    border-radius: 3px; cursor: pointer;
+  }
+  .copy-curl-btn:hover { background: #2a3a4a; color: #fff; }
+  .copy-curl-btn.copied { color: #00ff88; border-color: #00ff88; }
+  #drawerBody { flex: 1; overflow-y: auto; padding: 10px 14px; }
+  .drawer-loading, .drawer-empty, .drawer-error { color: #666; padding: 20px 0; text-align: center; font-size: 12px; }
+  .drawer-error { color: #ff6666; }
+  .tl-card {
+    margin-bottom: 10px; padding: 8px 10px; border-radius: 4px;
+    background: #1a1a2e; border-left: 3px solid #444;
+  }
+  .tl-user { border-left-color: #4488ff; }
+  .tl-thinking { border-left-color: #aa88ff; }
+  .tl-text { border-left-color: #00ff88; }
+  .tl-tool { border-left-color: #ffaa33; }
+  .tl-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 11px; }
+  .tl-label { font-weight: bold; }
+  .tl-user .tl-label { color: #4488ff; }
+  .tl-thinking .tl-label { color: #aa88ff; }
+  .tl-text .tl-label { color: #00ff88; }
+  .tl-tool .tl-label { color: #ffaa33; }
+  .tl-ts { color: #556; }
+  .tl-body { font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: #ccc; }
+  .tl-toggle {
+    display: inline-block; margin-top: 6px; background: #2a2a4a; color: #00d4d4;
+    border: 1px solid #3a3a5a; border-radius: 3px; padding: 1px 8px;
+    cursor: pointer; font-size: 11px; font-family: inherit;
+  }
+  .tl-toggle:hover { background: #3a3a5a; }
+  .tl-copy {
+    display: inline-block; margin-top: 6px; background: #2a2a4a; color: #aaa;
+    border: 1px solid #3a3a5a; border-radius: 3px; padding: 1px 6px;
+    cursor: pointer; font-size: 11px; font-family: inherit;
+  }
+  .tl-copy:hover { background: #3a3a5a; color: #fff; }
+  .tl-copy.copied { color: #00ff88; border-color: #00ff88; }
+
+  /* ev-row 可点击 (点开抽屉看完整 HTTP 流) */
+  .ev-row { cursor: pointer; }
+  .ev-row:hover { background: #1a1a3a; }
+  .ev-row:focus { background: #1a1a3a; outline: 1px solid #00d4d4; outline-offset: -1px; }
+
+  /* 事件详情 tabs (请求 / 响应 / SSE Stream / Headers) */
+  .ev-tabs { display: flex; gap: 0; border-bottom: 1px solid #2a2a4a; margin-bottom: 10px; }
+  .ev-tab {
+    background: none; border: none; color: #888; padding: 6px 14px;
+    cursor: pointer; font-size: 12px; font-family: inherit;
+    border-bottom: 2px solid transparent; transition: color 0.15s, border-color 0.15s;
+  }
+  .ev-tab:hover { color: #ccc; }
+  .ev-tab.active { color: #00d4d4; border-bottom-color: #00d4d4; }
+  .ev-panel { display: none; }
+  .ev-panel.active { display: block; }
+  .ev-truncate-banner {
+    background: #3a2a1a; color: #ffaa00; padding: 4px 8px;
+    margin-bottom: 8px; border-radius: 3px; font-size: 11px;
+  }
+  .ev-raw {
+    font-family: monospace; font-size: 11px; line-height: 1.45;
+    background: #0a0a1a; color: #ccc; padding: 10px; border-radius: 4px;
+    white-space: pre-wrap; word-break: break-all; max-height: 60vh; overflow-y: auto;
+  }
+  .ev-headers { font-family: monospace; font-size: 11px; }
+  .ev-header-row { padding: 2px 0; border-bottom: 1px dotted #1a1a3a; }
+  /* Chrome Network 风格 SSE: 默认折叠, 摘要行可点开; type 过滤 chip 在面板头. */
+  .sse-event { border-left: 3px solid #00d4d4; margin: 3px 0; background: #11112a; }
+  .sse-event.sse-err { border-left-color: #ff6666; }
+  .sse-event.sse-done { border-left-color: #666; opacity: 0.7; }
+  /* block 间隔耗时染色: >1s 橙 (轻度卡顿), >5s 红 (明显阻塞). 一眼定位 SSE 流慢点 */
+  .sse-event.sse-slow-warn { border-left-color: #ffaa00; background: rgba(255, 170, 0, 0.06); }
+  .sse-event.sse-slow-err  { border-left-color: #ff4444; background: rgba(255, 68, 68, 0.10); }
+  .sse-event-head { padding: 6px 8px; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 8px; font-size: 11px; }
+  .sse-event-head:hover { background: #1a1a3a; }
+  .sse-event-head::before { content: '▶'; color: #666; font-size: 9px; transition: transform 0.15s; display: inline-block; width: 10px; }
+  .sse-event.open .sse-event-head::before { transform: rotate(90deg); }
+  .sse-event-name { color: #00d4d4; font-weight: bold; }
+  /* block 编号: 让用户一眼看出"哪两 block 之间空 20s". 用 #N/#M 直接对应日志/工具查询. */
+  .sse-event-idx { color: #888; font-size: 10px; min-width: 28px; font-family: monospace; }
+  /* 内容简述: block 类型关键字段 (tool 名 / delta type / stop_reason), 一行看清"是什么事件". */
+  .sse-event-hint { color: #ccc; font-size: 10px; font-style: italic; }
+  .sse-event-meta { color: #888; font-size: 10px; }
+  .sse-event-body { display: none; padding: 6px 8px 8px 26px; border-top: 1px dotted #2a2a4a; color: #ccc; white-space: pre-wrap; word-break: break-word; font-size: 11px; max-height: 50vh; overflow-y: auto; }
+  .sse-event.open .sse-event-body { display: block; }
+  .sse-event-body .k { color: #88ccff; }
+  .sse-event-body .v-str { color: #00ff88; }
+  .sse-event-body .v-num { color: #ffaa33; }
+  .sse-event-body .v-bool { color: #ff66aa; }
+  .sse-event-body .v-null { color: #888; font-style: italic; }
+  .sse-filter-bar { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 0; border-bottom: 1px dotted #2a2a4a; margin-bottom: 6px; align-items: center; }
+  .sse-filter-chip { padding: 2px 8px; font-size: 10px; color: #888; border: 1px solid #2a2a4a; border-radius: 10px; cursor: pointer; background: #1a1a3a; }
+  .sse-filter-chip:hover { border-color: #00d4d4; }
+  .sse-filter-chip.active { color: #00d4d4; border-color: #00d4d4; }
+  .sse-filter-chip[data-on="false"] { opacity: 0.4; }
+  /* SSE 搜索框: 复用 #11112a 底 / #3a3a5a 边 / #00d4d4 聚焦, 与 idleCfg input 统一. */
+  .sse-search-input { width: 150px; background: #11112a; color: #ccc; border: 1px solid #3a3a5a;
+    border-radius: 3px; padding: 2px 6px; font-size: 10px; font-family: inherit; }
+  .sse-search-input:focus { outline: none; border-color: #00d4d4; color: #00d4d4; }
+  .sse-search-input::placeholder { color: #555; }
+  .sse-search-count { color: #888; font-size: 10px; min-width: 52px; text-align: center; font-family: monospace; }
+  /* 搜索栏独立行: 实时输出框下方 / block 列表上方. 搜索框固定宽, 全部展开/折叠 margin-left:auto 推右. */
+  .sse-search-bar { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px dotted #2a2a4a; margin-bottom: 6px; }
+  /* 命中染色: 限定 .sse-event-head, 不覆盖 err/slow 的 border-left. hit=微橙底; current=更亮+橙outline. */
+  .sse-event.sse-search-hit .sse-event-head { background: #3a2a14; }
+  .sse-event.sse-search-current .sse-event-head { background: #5a4017; box-shadow: inset 0 0 0 1px #ffaa00; }
+  .sse-summary { color: #88ccff; font-size: 11px; margin-bottom: 4px; }
+  .sse-truncate-banner { background: #3a2a1a; border-left: 3px solid #ffaa33; padding: 6px 8px; margin-bottom: 6px; color: #ffaa33; font-size: 11px; }
+  .ev-header-k { color: #88ccff; }
+  .ev-header-v { color: #ccc; word-break: break-all; }
+
+  /* chip 组: 流请求 / 异常事件 各自一组, 同时常驻 (左右分栏, 不再 hidden 切换) */
+  .event-chips-group { display: inline-flex; align-items: center; gap: 4px; }
+
+  /* 流请求行: ts / status / method / url / agent / 首字 / total / size */
+  .req-row {
+    display: flex; align-items: center; gap: 8px; padding: 4px 8px;
+    border-bottom: 1px dotted #1a1a3a; font-size: 11px; cursor: pointer;
+    border-left: 3px solid transparent;
+  }
+  .req-row:hover { background: #1a1a3a; }
+  .req-row:focus { background: #1a1a3a; outline: 1px solid #00d4d4; outline-offset: -1px; }
+  .req-row-ok { border-left-color: #00ff88; }
+  .req-row-err { border-left-color: #ff6666; }
+  /* pending (进行中): SSE 流式中段 (status=200 但字节还在输出) 也走这里, 不能用 data-status="0"
+   * (SSE 响应头一到就是 200, 匹配不到). 用 classifyRequest 产的 class 统一驱动. */
+  .req-row-pending { border-left-color: #ffaa33; opacity: 0.75; }
+  .req-row-pending .req-status { color: #ffaa33; }
+  /* pending 子分色 (think/text): think 紫 (与 agent 行 state-stream-think #aa88ff 同源),
+   * text / 等首字 (无 phase) → 默认橙. 完成态 (ok/err) 不受影响. */
+  .req-row-pending.req-phase-think { border-left-color: #aa88ff; opacity: 0.9; }
+  .req-row-pending.req-phase-think .req-status { color: #aa88ff; }
+  .req-ts { color: #666; min-width: 56px; }
+  .req-status { color: #88ccff; font-weight: bold; min-width: 32px; }
+  .req-row-err .req-status { color: #ff6666; }
+  .req-method { color: #00d4d4; min-width: 44px; }
+  .req-url { color: #ccc; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .req-agent { color: #888; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .req-ttfb { color: #ccc; min-width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
+  .req-total { color: #ccc; min-width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
+  /* 流进行中: 总耗时是估算, 单一橙色提示 (覆盖分级色). */
+  .req-total.live { color: #ffaa00; }
+  /* 结束态按总耗时分级着色: 一眼看出"这次请求快/慢/很慢/异常".
+   * 阈值 (ms):  < 1s 一律绿 (毫秒级响应), 1s/10s/30s/5m 四档分级. */
+  .req-total.f-fast   { color: #00ff88; }  /* 绿:  < 1s         毫秒级 */
+  .req-total.f-ok     { color: #ccc;    }  /* 默认: 1s ~ 10s     正常 */
+  .req-total.f-warn   { color: #ffaa00; }  /* 黄:  10s ~ 30s    偏慢 */
+  .req-total.f-slow   { color: #ff8833; }  /* 橙:  30s ~ 5m     很慢 */
+  .req-total.f-error  { color: #ff4444; }  /* 红:  > 5m         异常 */
+  .req-size { color: #666; min-width: 56px; text-align: right; }
+  /* 流请求列表列头: 与 req-row flex 列宽对齐, 默认隐藏 (切到 requests tab 才显) */
+  .req-col-header {
+    display: flex; align-items: center; gap: 8px; padding: 4px 8px;
+    font-size: 10px; color: #556; text-transform: uppercase; letter-spacing: 0.5px;
+    border-bottom: 1px dotted #2a2a4a;
+  }
+  .req-col-header .col-ttfb { min-width: 52px; text-align: right; }
+  .req-col-header .col-total { min-width: 52px; text-align: right; }
+  .req-col-header .col-size { min-width: 56px; text-align: right; }
+
+  /* 实时 prompt 卡片 */
+  .tl-prompt { border-left-color: #00d4d4; }
+  .tl-prompt .tl-label { color: #00d4d4; }
+  /* 请求列表默认收起; 点 head 展开. body 内 system 默认展开、message 默认收起 (见 foldBlock) */
+  .tl-prompt > .tl-head { cursor: pointer; user-select: none; }
+  .tl-prompt > .tl-head .tl-label::before { content: '▸ '; color: #888; }
+  .tl-prompt.open > .tl-head .tl-label::before { content: '▾ '; }
+  .tl-prompt > .tl-body { display: none; }
+  .tl-prompt.open > .tl-body { display: block; }
+  .tl-sub { margin: 4px 0; padding: 4px 6px; background: #11112a; border-radius: 3px; }
+  .tl-sub-label { display: block; font-size: 10px; color: #888; margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .tl-sub-sys .tl-sub-label { color: #aa88ff; }
+  .tl-sub-msg .tl-sub-label { color: #6688cc; }
+  /* user/assistant 收起态: label + 预览 + 展开按钮 同一单行, 预览溢出省略. 展开后 full 多行自动撑开. */
+  .tl-sub-msg { display: flex; align-items: center; gap: 6px; }
+  .tl-sub-msg .tl-sub-label { display: inline; flex: none; margin: 0; }
+  .tl-sub-msg .tl-short { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tl-sub-msg .tl-full { flex: 1 1 auto; min-width: 0; }
+  .tl-sub-msg .tl-toggle { flex: none; margin: 0; }
+  .tl-sub-msg .tl-copy { flex: none; margin: 0; }
+
+  /* 异常事件流带 — 顶部状态栏下, 列头上. 固定高度, 新条目从下往上滚 */
+  .event-bar {
+    border-bottom: 1px solid #2a2a4a;
+    background: #14142a;
+    display: flex;
+    flex-direction: column;
+  }
+  /* 左右分栏: 流请求 + 异常事件 并排, 各自独立 head/body/滚动/追新, 底部共享拖动条 */
+  .event-panels { display: flex; flex-direction: row; min-height: 0; }
+  .event-panel {
+    flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; position: relative;
+  }
+  .event-panel + .event-panel { border-left: 1px solid #2a2a4a; }
+  .event-bar-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 5px 16px;
+    border-bottom: 1px solid #1a1a3a;
+    font-size: 11px;
+    flex-shrink: 0;
+  }
+  .event-bar-title { color: #00d4d4; font-weight: bold; margin-right: 4px; }
+  .event-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border-radius: 11px;
+    cursor: pointer;
+    user-select: none;
+    background: #1a1a3a;
+    border: 1px solid #2a2a4a;
+    color: #888;
+    transition: opacity 0.15s, border-color 0.15s;
+  }
+  .event-chip[data-on="true"] { color: #ddd; border-color: #3a3a5a; }
+  .event-chip[data-on="false"] { opacity: 0.4; }
+  .event-chip:hover { border-color: #00d4d4; }
+  .event-chip .dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  }
+  .event-chip[data-sev="error"]  .dot { background: #ff4444; }
+  .event-chip[data-sev="warn"]   .dot { background: #ffaa00; }
+  .event-chip[data-sev="notice"] .dot { background: #dddd44; }
+  .event-chip[data-sev="info"]   .dot { background: #00cc55; }
+  .event-chip b { color: #fff; font-weight: bold; min-width: 12px; text-align: right; }
+  .event-bar-btn {
+    background: #2a2a4a;
+    color: #00d4d4;
+    border: 1px solid #3a3a5a;
+    border-radius: 3px;
+    padding: 1px 8px;
+    font-size: 11px;
+    font-family: inherit;
+    cursor: pointer;
+    margin-left: auto;
+  }
+  .event-bar-btn:first-of-type { margin-left: auto; }
+  .event-bar-btn:hover { background: #3a3a5a; }
+  .event-bar-body {
+    height: 0;
+    overflow-y: auto;
+    padding: 0 16px;
+    font-size: 11px;
+    display: flex;
+    flex-direction: column;
+    scroll-behavior: smooth;
+    /* flex column 默认 flex-shrink:1 会压缩子内容, 必须 min-height:0
+       才能让超长子内容触发滚动而不是被压扁. */
+    min-height: 0;
+  }
+  .event-bar-body.has-events {
+    height: 110px;
+  }
+  /* 拖动条: 在 .event-bar 容器内, body 下方. 用户可手动调整流请求 / 异常事件列表高度.
+   * height 由 inline style 直接设, 这里只给默认 cursor / hover 视觉. */
+  .event-bar-resizer {
+    height: 6px;
+    cursor: ns-resize;
+    background: transparent;
+    border-top: 1px solid #1a1a3a;
+    flex-shrink: 0;
+    user-select: none;
+    position: relative;
+  }
+  .event-bar-resizer::after {
+    /* 中间 24px 宽拖动区视觉提示, hover 加亮 */
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 1px;
+    width: 32px;
+    height: 3px;
+    margin-left: -16px;
+    background: #2a2a4a;
+    border-radius: 2px;
+    transition: background 0.15s;
+  }
+  .event-bar-resizer:hover::after { background: #00d4d4; }
+  /* 拖动时禁用选中, 鼠标变 col-resize 全局 */
+  body.dragging-resizer { cursor: ns-resize; user-select: none; }
+    overflow-y: auto;
+    padding: 4px 16px;
+  }
+  .ev-row {
+    display: grid;
+    grid-template-columns: 56px 18px 110px 130px 1fr 40px;
+    align-items: center;
+    padding: 1px 0;
+    border-bottom: 1px dotted #1a1a3a;
+    animation: slideIn 0.2s ease-out;
+    gap: 4px;
+  }
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .ev-ts   { color: #556; font-family: monospace; }
+  .ev-icon { font-size: 10px; text-align: center; }
+  .ev-agent { color: #888; font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ev-type { color: #00d4d4; font-family: monospace; }
+  .ev-msg  { color: #ccc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ev-count{ color: #ffaa00; font-weight: bold; text-align: right; }
+  .ev-row-error  .ev-msg { color: #ff7777; }
+  .ev-row-warn   .ev-msg { color: #ffcc66; }
+  .ev-row-notice .ev-msg { color: #ddd888; }
+  .ev-row-info   .ev-msg { color: #88cc88; }
+  .ev-row-error  { border-bottom-color: #3a1a1a; }
+  .ev-row-warn   { border-bottom-color: #3a2a1a; }
+
+  /* 跳到最新浮标: 用户反向滚动时浮在右下, 点击滚到底 */
+  .ev-jump {
+    position: absolute;
+    bottom: 4px;
+    right: 8px;
+    padding: 2px 10px;
+    border-radius: 11px;
+    background: rgba(0, 212, 212, 0.18);
+    border: 1px solid #00d4d4;
+    color: #00d4d4;
+    font-size: 11px;
+    font-weight: bold;
+    cursor: pointer;
+    user-select: none;
+    z-index: 1;
+  }
+  .ev-jump:hover { background: rgba(0, 212, 212, 0.32); }
+
+  /* 实时输出区: thinking + text delta 持续追加, 在 SSE block 列表上方 */
+  .sse-live { background: #0a0a1a; border: 1px solid #2a2a4a; border-radius: 4px; margin-bottom: 8px; padding: 8px; }
+  .sse-live-head { color: #888; font-size: 11px; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .sse-live-body { font-size: 12px; line-height: 1.6; max-height: 30vh; overflow-y: auto; white-space: pre-wrap; word-break: break-word; color: #ccc; font-family: inherit; }
+  .sse-live-foot { color: #666; font-size: 10px; margin-top: 4px; text-align: right; }
+  .lv-think { color: #aa88ff; }
+  .lv-text  { color: #00ff88; }
+  .sse-live-empty { color: #555; font-style: italic; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>cc-monitor</h1>
+    <span class="monitor-toggle">
+      <button id="monitorToggle" class="switch" title="..." aria-pressed="false">
+        <span class="switch-knob"></span>
+      </button>
+      <span class="switch-text off" id="monitorText">...</span>
+    </span>
+    <button id="floatToggle" class="op-btn op-btn--tl" title="切换到悬浮框 (隐藏 dashboard, 置顶监控)">悬浮框</button>
+    <span class="ts" id="clock"></span>
+  </div>
+  <div class="status-bar">
+    <span><span class="label">Status: </span><span class="value" id="globalStatus">-</span></span>
+    <span><span class="label">Agents: </span><span class="value" id="agentCount">0</span></span>
+    <span><span class="label">Proxy: </span><span class="value" id="proxyUrl">...</span></span>
+    <span><span class="label">原 URL: </span><span class="value" id="originalUrl" title="cc 原本的 ANTHROPIC_BASE_URL (监控开启时被本代理顶替的值)">...</span></span>
+    <span class="config-link" id="idleCfg" title="点击编辑 main agent 清理时长 (秒)">清理: ...</span>
+  </div>
+  <!-- 顶部: 流请求 (HTTP 视角) + 异常事件 (系统视角) 左右分栏, 同时可见, 不再切换 -->
+  <div class="event-bar">
+    <div class="event-panels">
+      <!-- 左: 流请求 -->
+      <div class="event-panel" id="reqPanel">
+        <div class="event-bar-head">
+          <span class="event-bar-title">流请求</span>
+          <span class="event-chips-group" id="reqChips">
+            <span class="event-chip" data-status="all" data-on="true">全部 <b id="reqCountAll">0</b></span>
+            <span class="event-chip" data-status="ok"  data-on="true">成功 <b id="reqCountOk">0</b></span>
+            <span class="event-chip" data-status="err" data-on="true">失败 <b id="reqCountErr">0</b></span>
+          </span>
+          <button class="event-bar-btn" id="reqClear" title="清空流请求列表">清空</button>
+        </div>
+        <!-- 列头: 与 req-row flex 列宽对齐 -->
+        <div class="req-col-header" id="reqColHeader">
+          <span style="min-width:56px;">Time</span>
+          <span style="min-width:32px;">Status</span>
+          <span style="min-width:44px;">Method</span>
+          <span style="flex:1;min-width:0;">URL</span>
+          <span style="max-width:100px;">Agent</span>
+          <span class="col-ttfb">首字</span>
+          <span class="col-total">Total</span>
+          <span class="col-size">Size</span>
+        </div>
+        <div class="event-bar-body" id="reqBody"></div>
+        <!-- 浮标: absolute 浮在 panel 右下, 不在 body 内 → chip 重渲染 body 不会被清掉 -->
+        <div class="ev-jump" id="reqJump" hidden>↓ <span id="reqJumpN">0</span></div>
+      </div>
+      <!-- 右: 异常事件 -->
+      <div class="event-panel" id="evPanel">
+        <div class="event-bar-head">
+          <span class="event-bar-title">异常事件</span>
+          <span class="event-chips-group" id="evChips">
+            <span class="event-chip" data-sev="error"  data-on="true"><span class="dot"></span>错误 <b id="evCountError">0</b></span>
+            <span class="event-chip" data-sev="warn"   data-on="true"><span class="dot"></span>警告 <b id="evCountWarn">0</b></span>
+            <span class="event-chip" data-sev="notice" data-on="true"><span class="dot"></span>提示 <b id="evCountNotice">0</b></span>
+          </span>
+          <button class="event-bar-btn" id="evClear" title="清空异常事件列表">清空</button>
+        </div>
+        <div class="event-bar-body" id="evBody"></div>
+        <div class="ev-jump" id="evJump" hidden>↓ <span id="evJumpN">0</span></div>
+      </div>
+    </div>
+    <!-- 共享拖动条: 同时调两个 panel 的 body 高度. 加载时由 JS 从 localStorage 恢复, 拖动时实时改 inline height. -->
+    <div class="event-bar-resizer" id="barResizer" title="拖动调整列表高度"></div>
+  </div>
+
+  <div class="col-header">
+    <span>Agent</span>
+    <span>Rate</span>
+    <span>I/O</span>
+    <span>State</span>
+    <span>操作</span>
+  </div>
+  <div id="agents"></div>
+  <!-- Session 时间线抽屉 -->
+  <div id="sessionDrawer">
+    <div class="drawer-head">
+      <span id="drawerTitle"></span>
+      <div class="drawer-actions" id="drawerActions"></div>
+      <button id="drawerClose" title="关闭 (Esc)">×</button>
+    </div>
+    <div id="drawerBody"></div>
+  </div>
+</div>
+<script>
+const POLL_MS = 200;
+
+function formatTokens(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+  return String(n);
+}
+
+function formatIdle(ms) {
+  if (ms < 1000) return ms + 'ms';
+  const s = Math.round(ms / 1000);
+  if (s < 60) return s + 's';
+  const m = Math.floor(s / 60);
+  const rs = s % 60;
+  if (m < 60) return m + 'm' + rs + 's';
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return h + 'h' + rm + 'm';
+}
+
+function barHtml(pct) {
+  const v = Math.max(0, Math.min(1, pct));
+  const filled = Math.round(v * 10);
+  let html = '<span class="bar">';
+  for (let i = 0; i < 10; i++) {
+    html += i < filled ? '#' : '.';
+  }
+  html += '</span>';
+  return html;
+}
+
+function barColorClass(state, streamPhase) {
+  if (state === 'STREAM') {
+    return streamPhase === 'think' ? 'state-stream-think' : 'state-stream-text';
+  }
+  switch (state) {
+    case 'WAITING': return 'state-waiting';
+    case 'WORK': return 'state-work';
+    case 'SSE_STUCK': return 'state-sse-stuck';
+    case 'DISCONNECTED': return 'state-disconnected';
+    default: return 'state-idle';
+  }
+}
+
+function stateHtml(state, ms, streamTokens, streamPhase) {
+  const dur = formatIdle(ms);
+  let label = state === 'SSE_STUCK' ? 'SSE-STUCK' : state;
+  if (state === 'STREAM' && streamPhase) label = `STREAM(${streamPhase})`;
+  const cls = state === 'STREAM'
+    ? (streamPhase === 'think' ? 'state state-stream-think' : 'state state-stream-text')
+    : 'state state-' + state.toLowerCase().replace('_', '-');
+  const tok = (state === 'STREAM' && streamTokens > 0) ? ` <span style="color:#00d4d4">${formatTokens(streamTokens)}</span>` : '';
+  return `<span class="${cls}">${label} ${dur}${tok}</span>`;
+}
+
+function ioHtml(lastIn, tps, estimated) {
+  const parts = [];
+  if (lastIn > 0) parts.push(`<span class="io-in">↑${formatTokens(lastIn)}</span>`);
+  if (tps > 0) parts.push(`<span class="io-out">↓${estimated ? '~' : ''}${tps}</span>`);
+  return parts.join(' ') || '<span style="color:#333">-</span>';
+}
+
+// 时间格式化: 入参 epoch ms 或 ISO 字符串 → 本地时区 HH:MM:SS.
+// 异常事件 ts 是 epoch ms (proxy.js: Date.now()), data.ts 是 ISO 字符串 (buildStatus),
+// 入参统一用 Date 构造, 输出用本地时区 padStart 拼 HH:MM:SS.
+function fmtTime(ts) {
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return '--:--:--';
+  return [d.getHours(), d.getMinutes(), d.getSeconds()]
+    .map(n => String(n).padStart(2, '0')).join(':');
+}
+
+function render(data) {
+  const agents = data.agents || {};
+  const keys = Object.keys(agents);
+  // 全局徽章用 state 判 (非 IDLE 即活跃), 不能用 active 字段:
+  // active = lastTs 2s 内有 delta, STREAM 态上游停顿 >2s (think↔text 切换/网络抖动/长间隔)
+  // 时 active=false, 但 SSE 仍 open、流仍在进行 → 误报 IDLE. state 用 60s 窗,
+  // 与单 agent 行 (renderAgentRow 用 a.state) 判据一致, 消除"单行绿/全局灰"矛盾.
+  const anyActive = keys.some(k => agents[k].state && agents[k].state !== 'IDLE');
+
+  document.getElementById('clock').textContent = data.ts ? fmtTime(data.ts) : '';
+  document.getElementById('globalStatus').textContent = anyActive ? 'ACTIVE' : 'IDLE';
+  document.getElementById('globalStatus').className = 'value ' + (anyActive ? 'active' : 'idle');
+  document.getElementById('agentCount').textContent = keys.length;
+  // 清理时长显示: 渲染期间不打断正在编辑的 input, 通过"有 child input 就不刷文本"判断
+  if (Number.isFinite(data.idleCleanupMsMain)) {
+    const el = document.getElementById('idleCfg');
+    if (el && el.firstElementChild?.tagName !== 'INPUT') {
+      el.textContent = '清理: ' + Math.round(data.idleCleanupMsMain / 1000) + 's';
+    }
+  }
+
+  const el = document.getElementById('agents');
+
+  if (keys.length === 0) {
+    el.innerHTML = '<div class="no-agents">No agents<div class="hint">Start cc with ANTHROPIC_BASE_URL=http://' + document.getElementById('proxyUrl').textContent + '</div></div>';
+    return;
+  }
+
+  // Group by session
+  const groups = {};
+  const orderMains = [];
+  for (const id of keys) {
+    const a = agents[id];
+    const sid = a.sessionId;
+    if (!sid) continue;
+    if (!groups[sid]) groups[sid] = { main: null, subs: [] };
+    if (a.isSubagent) {
+      groups[sid].subs.push(id);
+    } else {
+      groups[sid].main = id;
+      orderMains.push(id);
+    }
+  }
+
+  let html = '';
+
+  // Render groups with main
+  const renderedSessions = new Set();
+  for (const mainId of orderMains) {
+    const main = agents[mainId];
+    const sid = main.sessionId;
+    const grp = groups[sid];
+    renderedSessions.add(sid);
+
+    // Main row
+    html += renderAgentRow(mainId, main, 'main');
+
+    // Sub rows
+    if (grp && grp.subs.length > 0) {
+      for (const subId of grp.subs.sort()) {
+        html += renderAgentRow(subId, agents[subId], 'sub');
+      }
+    }
+  }
+
+  // Orphan sub groups
+  for (const sid of Object.keys(groups)) {
+    const grp = groups[sid];
+    if (grp.main || grp.subs.length === 0 || renderedSessions.has(sid)) continue;
+
+    html += `<div class="agent-row orphan-header">${esc(sid.slice(0, 11))} (no main)</div>`;
+    for (const subId of grp.subs.sort()) {
+      html += renderAgentRow(subId, agents[subId], 'sub');
+    }
+  }
+
+  el.innerHTML = html;
+}
+
+// 卡死态判定：SSE_STUCK 立即亮按钮；WAITING 超 60s 才亮（短时间是正常 thinking）
+// DISCONNECTED 已显式断开, kill 按钮无意义, 隐藏
+const WAITING_KILL_MS = 60000;
+function isKillable(state, stateMs) {
+  if (state === 'DISCONNECTED') return false;
+  if (state === 'SSE_STUCK') return true;
+  if (state === 'WAITING' && stateMs >= WAITING_KILL_MS) return true;
+  return false;
+}
+
+function renderAgentRow(id, a, rowClass) {
+  const state = a.state || 'IDLE';
+  const stateMs = a.stateMs || a.idleMs || 0;
+  const phase = a.streamPhase || null;
+  const barCls = barColorClass(state, phase);
+  const killable = isKillable(state, stateMs);
+  const action = `<button class="op-btn op-btn--tl" data-agent="${esc(id)}" title="查看 session 对话时间线">📜</button>` +
+    (killable ? `<button class="op-btn op-btn--kill" data-agent="${esc(id)}" title="中断此请求，cc 将自动重试">⚡</button>` : '');
+  return (
+    `<div class="agent-row ${rowClass}${killable ? ' killable' : ''}" data-agent="${esc(id)}" data-session="${esc(a.sessionId || '')}">` +
+    `<span class="agent-name">${esc(id)}</span>` +
+    `<span class="${barCls}">${barHtml(Math.min(1, a.tps / 200))}</span>` +
+    `<span class="io">${ioHtml(a.lastInputTokens, a.tps, a.tpsEstimated)}</span>` +
+    `<span>${stateHtml(state, stateMs, a.streamTokens || 0, phase)}</span>` +
+    `<span>${action}</span>` +
+    `</div>`
+  );
+}
+
+function esc(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+async function poll() {
+  try {
+    const resp = await fetch('/status');
+    const data = await resp.json();
+    render(data);
+  } catch (e) {
+    // proxy not up yet
+  }
+}
+
+// Poll via proxy /status, with backoff when the tab is hidden.
+let pollTimer = null;
+function startPolling() {
+  if (pollTimer) return;
+  poll(); // immediate
+  pollTimer = setInterval(poll, POLL_MS);
+}
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    stopPolling();
+  } else {
+    startPolling();
+  }
+});
+startPolling();
+// Set proxy URL in status bar
+(async () => {
+  let port;
+  try {
+    port = await window.ccMonitor.getPort();
+  } catch (e) {
+    // Dashboard is always served by the proxy, so window.location.port
+    // is authoritative. Fall back to empty so a stale hardcode never lies.
+    port = window.location.port || '';
+  }
+  document.getElementById('proxyUrl').textContent = port ? 'localhost:' + port : '(proxy not running)';
+})();
+
+// --- Monitor toggle (ANTHROPIC_BASE_URL in ~/.claude/settings.json) ---
+const monitorBtn = document.getElementById('monitorToggle');
+let monitorState = null;
+
+function renderMonitor() {
+  if (!monitorState) return;
+  const on = monitorState.monitoring;
+  const sp = monitorState.settingsPath || '~/.claude/settings.json';
+  const key = monitorState.settingsKey || 'env.ANTHROPIC_BASE_URL';
+  const from = on ? monitorState.proxyUrl : (monitorState.current || monitorState.directUrl);
+  const to = on ? (monitorState.previous || monitorState.directUrl) : monitorState.proxyUrl;
+  // 原 URL: cc 真实指向的 baseurl. 监控开 = 被顶替前的值; 监控关 = 当前已恢复的值. 同源显示.
+  const origEl = document.getElementById('originalUrl');
+  if (origEl) origEl.textContent = monitorState.originalUrl || monitorState.directUrl || '?';
+  monitorBtn.className = 'switch ' + (on ? 'on' : '');
+  monitorBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  const mtxt = document.getElementById('monitorText');
+  mtxt.textContent = on ? '运行中' : '已停用';
+  mtxt.className = 'switch-text ' + (on ? 'on' : 'off');
+  monitorBtn.title =
+    `点击将修改文件：\n${sp}\n\n` +
+    `配置项：${key}\n` +
+    `当前值：${from}（${on ? '监控中' : '直连，无监控'}）\n` +
+    `将改为：${to}\n\n` +
+    `仅改这一项，settings.json 其他配置不动`;
+}
+
+async function loadMonitor() {
+  try {
+    const r = await fetch('/config/baseurl');
+    monitorState = await r.json();
+    renderMonitor();
+  } catch (e) {
+    monitorBtn.disabled = true;
+    document.getElementById('monitorText').textContent = 'N/A';
+    monitorBtn.title = 'proxy 不支持配置端点';
+  }
+}
+
+monitorBtn.addEventListener('click', async () => {
+  if (!monitorState) return;
+  const action = monitorState.monitoring ? 'disable' : 'enable';
+  monitorBtn.disabled = true;
+  document.getElementById('monitorText').textContent = '...';
+  try {
+    const r = await fetch('/config/baseurl', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    });
+    const data = await r.json();
+    if (!r.ok || !data.ok) throw new Error(data.error || 'failed');
+    monitorState = data;
+    renderMonitor();
+  } catch (e) {
+    alert('切换失败: ' + e.message);
+    renderMonitor();
+  } finally {
+    monitorBtn.disabled = false;
+  }
+});
+
+loadMonitor();
+
+// --- Idle 清理时长 inline edit: 点状态栏"清理: Ns" → 变 input, 失焦/Enter POST, Esc 取消 ---
+const idleCfg = document.getElementById('idleCfg');
+let idleEditing = false;  // 编辑期间防 render() 覆盖 input
+function renderIdle(ms) { idleCfg.textContent = '清理: ' + Math.round(ms / 1000) + 's'; }
+async function loadIdle() {
+  try {
+    const r = await fetch('/config/idle');
+    if (!r.ok) return;
+    const { main } = await r.json();
+    if (Number.isFinite(main)) renderIdle(main);
+  } catch (e) {}
+}
+function commitIdle() {
+  const input = idleCfg.querySelector('input');
+  if (!input) return;
+  const sec = parseFloat(input.value);
+  if (!Number.isFinite(sec) || sec < 0) {
+    alert('请输入非负数 (秒)');
+    input.focus();
+    return;
+  }
+  idleCfg.textContent = '...';
+  fetch('/config/idle', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ main: Math.round(sec * 1000) }),
+  }).then(r => r.json().then(d => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok || !d.ok) throw new Error(d.error || 'failed');
+      idleEditing = false;
+      renderIdle(d.main);
+    })
+    .catch(err => {
+      idleEditing = false;
+      alert('保存失败: ' + err.message);
+      loadIdle();  // 拉回服务端真值
+    });
+}
+idleCfg.addEventListener('click', () => {
+  if (idleEditing) return;
+  const cur = (idleCfg.textContent.match(/(\d+)s/) || [])[1] || '120';
+  idleEditing = true;
+  idleCfg.innerHTML = '<input type="number" min="0" max="3600" value="' + cur + '" />s';
+  const input = idleCfg.querySelector('input');
+  input.focus();
+  input.select();
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); commitIdle(); }
+    else if (e.key === 'Escape') {
+      idleEditing = false;
+      loadIdle();  // 恢复显示
+    }
+  });
+  input.addEventListener('blur', commitIdle);
+});
+loadIdle();
+
+// 悬浮框: 切换到悬浮框模式 (显悬浮框 + 藏 dashboard). 点悬浮框 ‹ 回 dashboard
+// 嵌入 iframe 时 (本工具集「实时监控」页) 拿不到顶层窗口的 contextBridge → postMessage 通知外层 React 页
+document.getElementById('floatToggle').addEventListener('click', () => {
+  if (window.ccMonitor && window.ccMonitor.enterFloatMode) window.ccMonitor.enterFloatMode();
+  else if (window.parent !== window) window.parent.postMessage({ type: 'enter-float' }, '*');
+});
+
+// --- Kill stuck agent: manual disconnect → cc SDK auto-retries ---
+document.getElementById('agents').addEventListener('click', async (e) => {
+  const btn = e.target.closest('.op-btn--kill');
+  if (!btn) return;
+  const agentId = btn.dataset.agent;
+  if (!agentId) return;
+  if (!confirm(`中断 ${agentId} 的请求？\ncc 将自动重试，但该流已生成内容会丢失。`)) return;
+  btn.disabled = true;
+  btn.textContent = '断开中...';
+  try {
+    const r = await fetch('/agent/kill', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId }),
+    });
+    const data = await r.json();
+    if (!r.ok || !data.ok) throw new Error(data.error || 'failed');
+    // 下次 poll 自动刷新状态；cc 重试后该 agent 回流到 WAITING/STREAM
+  } catch (err) {
+    alert('断开失败: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '⚡';
+  }
+});
+
+// --- Session 时间线抽屉: 点击 agent 行查看对话 (用户输入/思考/回复) ---
+const TL_ROLE = {
+  user:     { label: '👤 用户', cls: 'tl-user' },
+  thinking: { label: '🤔 思考', cls: 'tl-thinking' },
+  text:     { label: '💬 回复', cls: 'tl-text' },
+  tool_use: { label: '🔧 调用', cls: 'tl-tool' },
+};
+const TL_FOLD = 400;  // 超过此字数 → 折叠, 点击展开
+
+// 实时输出: 打开 SSE 详情后用 EventSource 订阅 /event/detail/stream?cid= — proxy 端按
+// chunk 节奏切出 content_block_delta 即推一个 SSE 事件, dashboard onmessage 直接追加, 真正逐字流式.
+// 端点打开时回放历史 delta (用户中途打开时已流过的字), 流结束推 {done:true} 自动关连接.
+// 关闭/切换/新 cid → 关旧 ES.
+let liveES = null;        // 当前 EventSource
+let liveESCid = null;     // 绑定的 cid (避免旧连接残留)
+let liveRendered = 0;     // 已渲染 delta 段数 (foot 显示用)
+let liveBuf = [];         // rAF 批量缓冲: onmessage 推入, flush 时一次 append (减 reflow)
+let liveRaf = 0;          // rAF id (合并连续 delta 到单帧渲染)
+function startLiveStream(cid) {
+  stopLiveStream();
+  const container = document.getElementById('sseLiveBody');
+  const foot = document.getElementById('sseLiveFoot');
+  if (!container) return;
+  liveESCid = cid;
+  liveRendered = 0;
+  if (foot) foot.textContent = '流进行中…';
+  // rAF 批量 flush: 攒 liveBuf 到下一帧一次 append + 一次 scrollTop, 高频 delta 不再逐个 reflow.
+  function flushLive() {
+    liveRaf = 0;
+    if (!liveBuf.length) return;
+    const batch = liveBuf; liveBuf = [];
+    appendLiveDeltas(container, batch);
+    liveRendered += batch.length;
+    if (foot) foot.textContent = '流进行中… (' + liveRendered + ' 段)';
+  }
+  let es;
+  try { es = new EventSource('/event/detail/stream?cid=' + encodeURIComponent(cid)); }
+  catch (e) { if (foot) foot.textContent = '订阅失败'; return; }
+  liveES = es;
+  es.onmessage = (msg) => {
+    if (liveESCid !== cid) { es.close(); return; }
+    let payload = null;
+    try { payload = JSON.parse(msg.data); } catch (e) { return; }
+    if (payload.done) {
+      // 收尾: 取消未触发 flush, 立即冲刷残留 buffer (不丢已到达未渲染的 delta), 再标记结束.
+      if (liveRaf) { cancelAnimationFrame(liveRaf); liveRaf = 0; }
+      flushLive();
+      if (foot) foot.textContent = '已结束 (' + liveRendered + ' 段)';
+      es.close();
+      return;
+    }
+    if (payload.kind && payload.text) {
+      liveBuf.push({ kind: payload.kind, text: payload.text });
+      if (!liveRaf) liveRaf = requestAnimationFrame(flushLive);
+    }
+  };
+  es.onerror = () => { /* 流真结束 server 主动 res.end, 浏览器关闭; 不需手动重连 */ };
+}
+function stopLiveStream() {
+  if (liveES) { try { liveES.close(); } catch (e) {} liveES = null; }
+  liveESCid = null;
+  // 取消未触发的 flush, 清 buffer: 切换/关闭抽屉时旧流残留 delta 不再追加.
+  if (liveRaf) { cancelAnimationFrame(liveRaf); liveRaf = 0; }
+  liveBuf = [];
+}
+
+function closeSessionDrawer() {
+  stopLiveStream();
+  document.getElementById('sessionDrawer').classList.remove('open');
+  document.getElementById('drawerActions').innerHTML = '';
+}
+
+function renderTimeline(entries) {
+  const body = document.getElementById('drawerBody');
+  if (!entries.length) {
+    body.innerHTML = '<div class="drawer-empty">无对话内容</div>';
+    return;
+  }
+  body.innerHTML = entries.map((en) => {
+    const m = TL_ROLE[en.role] || { label: en.role, cls: 'tl-other' };
+    const label = (en.role === 'tool_use' && en.name) ? ('🔧 ' + en.name) : m.label;
+    const ts = en.ts ? en.ts.slice(11, 19) : '';
+    const full = en.text || '';
+    let inner;
+    if (full.length > TL_FOLD) {
+      inner = '<span class="tl-short">' + esc(full.slice(0, TL_FOLD)) + '…</span>' +
+              '<span class="tl-full" hidden>' + esc(full) + '</span>' +
+              '<button class="tl-toggle">▸ 展开全部 (共' + full.length + '字)</button>';
+    } else {
+      inner = '<span class="tl-full">' + esc(full) + '</span>';
+    }
+    return '<div class="tl-card ' + m.cls + '">' +
+      '<div class="tl-head"><span class="tl-label">' + label + '</span>' +
+      (ts ? '<span class="tl-ts">' + ts + '</span>' : '') + '</div>' +
+      '<div class="tl-body">' + inner + '</div></div>';
+  }).join('');
+}
+
+// --- 实时 prompt (点击 agent 行): proxy 拦截的 cc 发给 LLM 的真实请求体 ---
+function safeJson(v) { try { return JSON.stringify(v, null, 2); } catch (e) { return String(v); } }
+function extractSystemText(s) {
+  if (!s) return '';
+  if (typeof s === 'string') return s;
+  if (Array.isArray(s)) return s.filter(b => b && b.type === 'text').map(b => b.text || '').join('\n');
+  return '';
+}
+function extractMsgText(c) {
+  if (typeof c === 'string') return c;
+  if (Array.isArray(c)) return c.map(b => {
+    if (!b) return '';
+    if (typeof b.text === 'string') return b.text;
+    if (typeof b.thinking === 'string') return '[思考]\n' + b.thinking;
+    if (b.type === 'tool_use') return '[调用 ' + (b.name || '?') + ']\n' + safeJson(b.input);
+    if (b.type === 'tool_result') return '[返回]\n' + (typeof b.content === 'string' ? b.content : safeJson(b.content));
+    return '';
+  }).join('\n');
+  return '';
+}
+// 折叠子块 (system / 单条 message). expanded 控制初始展开状态.
+function foldBlock(label, text, cls, expanded) {
+  const full = text || '';
+  const isLong = full.length > TL_FOLD;
+  const head = '<div class="tl-sub ' + cls + '"><span class="tl-sub-label">' + esc(label) + '</span>';
+  // 仅长文本生成 short 预览 (收起态显示截断); 短文本收起时直接隐藏内容, 只留标签.
+  const shortPart = isLong
+    ? '<span class="tl-short"' + (expanded ? ' hidden' : '') + '>' + esc(full.slice(0, TL_FOLD)) + '…</span>'
+    : '';
+  const fullPart = '<span class="tl-full"' + (expanded ? '' : ' hidden') + '>' + esc(full) + '</span>';
+  const copy = '<button class="tl-copy" title="复制整段">复制</button>';
+  const btn = expanded
+    ? '<button class="tl-toggle on">▴ 收起</button>'
+    : '<button class="tl-toggle">▸ 展开 (' + full.length + '字)</button>';
+  return head + shortPart + fullPart + copy + btn + '</div>';
+}
+function renderPrompts(prompts) {
+  const body = document.getElementById('drawerBody');
+  if (!prompts.length) {
+    body.innerHTML = '<div class="drawer-empty">暂无请求<br>agent 还没发过请求, 或已被清理</div>';
+    return;
+  }
+  body.innerHTML = prompts.map((p) => {
+    const b = p.body || {};
+    const model = b.model || '?';
+    const ts = p.ts ? fmtTime(p.ts) : '';
+    const sysText = extractSystemText(b.system);
+    const msgs = Array.isArray(b.messages) ? b.messages : [];
+    let inner = '';
+    if (sysText) inner += foldBlock('system (' + sysText.length + '字)', sysText, 'tl-sub-sys', true);
+    msgs.forEach((m, i) => {
+      inner += foldBlock('[' + i + '] ' + (m.role || '?'), extractMsgText(m.content), 'tl-sub-msg', false);
+    });
+    return '<div class="tl-card tl-prompt">' +
+      '<div class="tl-head"><span class="tl-label">📤 请求 #' + p.seq + '</span>' +
+      '<span class="tl-ts">' + ts + ' · ' + esc(model) + '</span></div>' +
+      '<div class="tl-body">' + inner + '</div></div>';
+  }).join('');
+}
+async function openPromptsDrawer(agentId) {
+  const drawer = document.getElementById('sessionDrawer');
+  drawer.classList.add('open');
+  document.getElementById('drawerTitle').textContent = '实时请求 · ' + agentId;
+  document.getElementById('drawerActions').innerHTML = '';
+  const body = document.getElementById('drawerBody');
+  body.innerHTML = '<div class="drawer-loading">加载请求…</div>';
+  try {
+    const r = await fetch('/agent/prompts?id=' + encodeURIComponent(agentId));
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || ('HTTP ' + r.status));
+    }
+    const data = await r.json();
+    renderPrompts(data.prompts || []);
+  } catch (e) {
+    body.innerHTML = '<div class="drawer-error">加载失败：' + esc(e.message) + '</div>';
+  }
+}
+
+// --- 异常事件 HTTP 详情抽屉: 复用 #sessionDrawer 容器, tabs 渲染 req/resp/SSE/headers ---
+// tabs 按事件类型智能选择 (HTTP 错误 → request+response, SSE 异常 → request+sse...).
+// SSE 流时 resp 字段为 null, response tab 自动隐藏.
+const EV_TABS_BY_TYPE = {
+  // HTTP 错误 → 看请求+响应
+  'upstream-5xx':    ['request', 'response', 'headers'],
+  'upstream-429':    ['request', 'response', 'headers'],
+  'upstream-401':    ['request', 'response', 'headers'],
+  'upstream-403':    ['request', 'response', 'headers'],
+  // SSE 解析类 → 看请求+SSE 字节+上游响应+诊断详情
+  'parse-fail':           ['request', 'sse', 'response', 'headers', 'details'],
+  'event-error-payload':  ['request', 'sse', 'response', 'headers', 'details'],
+  'unknown-type':         ['request', 'sse', 'response', 'headers', 'details'],
+  'event-field':          ['request', 'sse', 'response', 'headers', 'details'],
+  // 流级异常 → 看请求+SSE 字节+上游响应+诊断详情
+  'upstream-timeout':     ['request', 'sse', 'response', 'headers', 'details'],
+  'upstream-empty-stream':['request', 'sse', 'response', 'headers', 'details'],
+  'no-delta-on-close':    ['request', 'sse', 'response', 'headers', 'details'],
+  'no-delta-tool-only':   ['request', 'sse', 'response', 'headers', 'details'],
+  'upstream-stream-error':['request', 'sse', 'response', 'headers', 'details'],
+  // 时序/业务 → 看 SSE 字节+上游响应+诊断详情
+  'sse-stuck':            ['sse', 'response', 'headers', 'details'],
+  'waiting-long':         ['sse', 'response', 'headers', 'details'],
+  'stop-reason-refusal':  ['sse', 'response', 'headers', 'details'],
+  'stop-reason-overload': ['sse', 'response', 'headers', 'details'],
+  'stop-reason-max-tokens':['sse', 'response', 'headers', 'details'],
+  'stop-reason-pause-turn':['sse', 'response', 'headers', 'details'],
+  // 连接层
+  'upstream-tcp-error':   ['request', 'headers'],
+  'client-disconnect':    ['request', 'sse', 'response', 'headers', 'details'],
+  'upstream-byte-corruption': ['request', 'sse', 'response', 'headers', 'details'],
+  'agent-unknown':        ['headers'],
+};
+const EV_TAB_LABELS = { request: '请求', response: '响应', sse: 'SSE Stream', headers: 'Headers', details: '诊断详情' };
+
+async function openEventDrawer(cid, rowEl) {
+  const drawer = document.getElementById('sessionDrawer');
+  drawer.classList.add('open');
+  const evType = rowEl.dataset.type || '';
+  // 标题: req-row (无 dataset.type, agent 列是 .req-agent) 与 ev-row 分别构造,
+  // 避免点流请求行时退化成 "事件详情 · ·" (evType 空 + .ev-agent 取不到).
+  if (rowEl.classList.contains('req-row')) {
+    const a = (rowEl.querySelector('.req-agent')?.textContent || '').trim();
+    const m = (rowEl.querySelector('.req-method')?.textContent || '').trim();
+    const u = (rowEl.querySelector('.req-url')?.textContent || '').trim();
+    document.getElementById('drawerTitle').textContent = '流请求 · ' + a + (m ? ' ' + m : '') + (u ? ' ' + u : '');
+  } else {
+    const agent = (rowEl.querySelector('.ev-agent')?.textContent || '').trim();
+    document.getElementById('drawerTitle').textContent = '事件详情 · ' + evType + (agent ? ' · ' + agent : '');
+  }
+  const body = document.getElementById('drawerBody');
+  const actions = document.getElementById('drawerActions');
+  body.innerHTML = '<div class="drawer-loading">加载 HTTP 流…</div>';
+  actions.innerHTML = '';
+  try {
+    const r = await fetch('/event/detail?cid=' + encodeURIComponent(cid));
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || ('HTTP ' + r.status));
+    }
+    const data = await r.json();
+    renderEventDetail(body, data, evType);
+    installCopyCurlButton(actions, data);
+    // trace-id 复制: 头部显示短码, 复制按钮拿完整 UUID (与 proxy 端日志 trace=xxx 对齐)
+    installCopyTraceButton(actions, data.cid);
+    // 实时输出: EventSource 订阅 /event/detail/stream, proxy 逐字推 think/text delta (真逐字流式, 无轮询批)
+    startLiveStream(cid);
+  } catch (e) {
+    body.innerHTML = '<div class="drawer-error">加载失败：' + esc(e.message) + '</div>';
+  }
+}
+
+// 把异常请求重建为可粘贴的 curl 命令.
+// 单引号安全: 单引号字符串内出现的 ' 用 '\'' 转义 (curl/shell 通用).
+function buildCurlFromEvent(data) {
+  const method = (data.method || 'GET').toUpperCase();
+  const url = data.url || '';
+  const headers = (data.req && data.req.headers) || {};
+  const body = (data.req && data.req.body) || '';
+  const lines = ['curl -X ' + method + ' ' + shellQuote(url)];
+  for (const [k, v] of Object.entries(headers)) {
+    lines.push('  -H ' + shellQuote(k + ': ' + v));
+  }
+  if (body) lines.push('  --data-raw ' + shellQuote(body));
+  return lines.join(' \\\n');
+}
+
+function shellQuote(s) {
+  return "'" + String(s).replace(/'/g, "'\\''") + "'";
+}
+
+function installCopyCurlButton(actionsEl, data) {
+  const btn = document.createElement('button');
+  btn.className = 'copy-curl-btn';
+  btn.textContent = 'Copy as curl';
+  btn.title = '复制完整 curl 命令';
+  btn.addEventListener('click', async () => {
+    const text = buildCurlFromEvent(data);
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        // 降级: 临时 textarea + execCommand
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      btn.classList.add('copied');
+      btn.textContent = '✓ 已复制';
+      setTimeout(() => {
+        btn.classList.remove('copied');
+        btn.textContent = 'Copy as curl';
+      }, 1200);
+    } catch (e) {
+      btn.textContent = '复制失败';
+      setTimeout(() => { btn.textContent = 'Copy as curl'; }, 1500);
+    }
+  });
+  actionsEl.appendChild(btn);
+}
+
+// 抽屉头部展示 trace-id: 单个按钮, 显示短码 (前 8 位, 与日志 trace=xxx 对齐),
+// title 悬停看完整 UUID (36 字符), 点击复制完整 UUID (grep / 跨系统关联用).
+async function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+  } else {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  }
+}
+function installCopyTraceButton(actionsEl, cid) {
+  if (!cid) return;
+  const short = cid.slice(0, 8);
+  const btn = document.createElement('button');
+  btn.className = 'copy-curl-btn';
+  btn.style.fontFamily = 'monospace';
+  btn.innerHTML = '<span style="color:#888;">trace:</span> ' + esc(short);
+  btn.title = '点击复制完整 trace-id: ' + cid;
+  btn.addEventListener('click', async () => {
+    try {
+      await copyText(cid);
+      btn.classList.add('copied');
+      const orig = btn.innerHTML;
+      btn.innerHTML = '<span style="color:#00ff88;">✓</span> 已复制';
+      setTimeout(() => {
+        btn.classList.remove('copied');
+        btn.innerHTML = orig;
+      }, 1200);
+    } catch (e) {
+      btn.textContent = '复制失败';
+      setTimeout(() => { btn.innerHTML = '<span style="color:#888;">trace:</span> ' + esc(short); }, 1500);
+    }
+  });
+  actionsEl.insertBefore(btn, actionsEl.firstChild);
+}
+
+function renderEventDetail(container, data, evType) {
+  // tabs 选择 + 过滤 (SSE 流无 resp tab — data.resp === null)
+  let tabs = (EV_TABS_BY_TYPE[evType] || ['request', 'response', 'sse', 'headers'])
+    .filter(t => t !== 'response' || data.resp !== null);
+  // SSE Stream 优先: SSE 流请求点开默认看流字节 (最常看), 提到第一位.
+  // 非 SSE (data.sse=null, 如纯 HTTP 错误) 不提, 避免空面板 — 回退到原顺序第一个.
+  if (data.sse && tabs.includes('sse')) {
+    tabs = ['sse'].concat(tabs.filter(t => t !== 'sse'));
+  }
+  const tabsHtml = '<div class="ev-tabs">' + tabs.map((t, i) =>
+    '<button class="ev-tab' + (i === 0 ? ' active' : '') + '" data-tab="' + t + '">' +
+    esc(EV_TAB_LABELS[t]) + '</button>').join('') + '</div>';
+  let sseBlocks = null;
+  const panelsHtml = tabs.map((t, i) => {
+    let inner = '';
+    if (t === 'request')  inner = renderReqPanel(data.req);
+    if (t === 'response') inner = renderRespPanel(data.resp);
+    if (t === 'sse')      { const r = renderSsePanel(data.sse); inner = r.html; sseBlocks = r.blocks; }
+    if (t === 'headers')  inner = renderHeadersPanel(data);
+    if (t === 'details')  inner = renderDetailsPanel(data.details);
+    return '<div class="ev-panel' + (i === 0 ? ' active' : '') + '" data-panel="' + t + '">' +
+      inner + '</div>';
+  }).join('');
+  container.innerHTML = tabsHtml + panelsHtml;
+  // parsed blocks 挂 list 节点: 供 body 懒渲染 + 搜索匹配读 (不读 DOM textContent, 避免 reflow).
+  if (sseBlocks) {
+    const sl = container.querySelector('#sseEventList');
+    if (sl) sl._blocks = sseBlocks;
+  }
+  // tab 切换 (事件委托)
+  container.querySelectorAll('.ev-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      container.querySelectorAll('.ev-tab').forEach(b => b.classList.remove('active'));
+      container.querySelectorAll('.ev-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      const p = container.querySelector('.ev-panel[data-panel="' + btn.dataset.tab + '"]');
+      if (p) p.classList.add('active');
+    });
+  });
+  // SSE panel 折叠/展开/过滤交互 (默认折叠避免长列表爆屏)
+  bindSsePanelInteractions(container);
+}
+
+function renderReqPanel(req) {
+  if (!req) return '<div class="drawer-empty">无请求数据</div>';
+  const banner = req.bodyTruncated
+    ? '<div class="ev-truncate-banner">请求体已截断 (前 256 KB, 共 ' + esc(formatBytes(req.bodySize)) + ')</div>'
+    : '';
+  return banner + '<div class="ev-raw">' + esc(req.body) + '</div>';
+}
+
+function renderRespPanel(resp) {
+  if (!resp) return '<div class="drawer-empty">无响应数据</div>';
+  const banner = resp.bodyTruncated
+    ? '<div class="ev-truncate-banner">响应体已截断 (前 256 KB, 共 ' + esc(formatBytes(resp.bodySize)) + ')</div>'
+    : '';
+  // SSE 流时 body=null (字节在 "SSE Stream" tab), 不能 esc(null) 显示字面 "null".
+  const bodyHtml = (resp.body === null || resp.body === undefined)
+    ? '<div class="drawer-empty">SSE 流 (响应字节在 "SSE Stream" tab)</div>'
+    : '<div class="ev-raw">' + esc(resp.body) + '</div>';
+  return banner +
+    '<div style="margin-bottom:8px;color:#88ccff;">HTTP ' + esc(String(resp.statusCode || '?')) + '</div>' +
+    bodyHtml;
+}
+
+// 列出该 cid 全部 recordEvent 诊断快照: ts + type(着色) + message + detail 树.
+// 复用 renderSseJson 做 JSON 树形展开 (它是通用函数, SSE 只是命名巧合).
+// 强制 open class: 诊断详情 tab 用户预期直接看到 detail 树, 不需要折叠交互.
+function renderDetailsPanel(details) {
+  if (!Array.isArray(details) || details.length === 0) {
+    return '<div class="drawer-empty">无 recordEvent 快照 (该请求可能未触发任何错误事件)</div>';
+  }
+  return details.map(d => {
+    const ts = d.ts ? new Date(d.ts).toISOString().slice(11, 19) : '??:??:??';
+    const sevColor = d.severity === 'error' ? '#ff6b6b'
+      : (d.severity === 'warn' ? '#ffa500' : '#88ccff');
+    let bodyHtml = '';
+    if (d.detail && typeof d.detail === 'object' && Object.keys(d.detail).length > 0) {
+      bodyHtml = '<div class="sse-event-body" style="display:block;padding-left:0;">' +
+        renderSseJson(d.detail, 0) +
+        '</div>';
+    }
+    return '<div class="sse-event open" data-type="' + esc(d.type) + '">' +
+      '<div class="sse-event-head">' +
+        '<span class="sse-event-name" style="color:' + sevColor + ';">' + esc(d.type) + '</span>' +
+        '<span class="sse-event-meta">' + esc(ts) + ' · ' + esc(d.severity || '') + '</span>' +
+        '</div>' +
+      '<div style="padding:4px 0;color:#ccc;font-size:11px;">' + esc(d.message || '') + '</div>' +
+      bodyHtml +
+      '</div>';
+  }).join('');
+}
+
+// Chrome Network 风格: 顶部摘要 + type 过滤 chip + 每条 event 默认折叠(仅看 event 名+长度),
+// 点开才渲染 JSON 树. 100+ events 不爆屏幕, 关键信息(摘要/过滤/总数)一眼可见.
+// block 间隔耗时: sse.blocks[i].ts 是 proxy 切出完整块时刻, vs 上一个 block 算 delta.
+// 末块若不完整 (截断/卡死) 无 ts, 标 '—' 避免猜.
+function renderSsePanel(sse) {
+  if (!sse) return { html: '<div class="drawer-empty">无 SSE 字节流</div>', blocks: [] };
+  const banner = sse.bytesTruncated
+    ? '<div class="sse-truncate-banner">SSE 字节流已截断 (前 2 MB, 共 ' + esc(formatBytes(sse.bytesSize)) + ')</div>'
+    : '';
+  const raw = sse.bytes || '';
+  // parseSseBlocks: split 双换行 (兼容 CRLF) + parseOneSseEvent. 末块可能不完整 (截断), 仍渲染.
+  const parsed = parseSseBlocks(sse);
+  if (parsed.length === 0) {
+    return { html: banner + '<div class="drawer-empty">字节流为空</div>', blocks: parsed };
+  }
+
+  // 收集 type 计数 → 过滤 chip
+  const typeCounts = {};
+  for (const ev of parsed) {
+    const t = ev.err ? 'parse-error' : (ev.event || 'message');
+    typeCounts[t] = (typeCounts[t] || 0) + 1;
+  }
+  const types = Object.keys(typeCounts).sort();
+
+  // block 间隔耗时: sse.blocks[i] 是 proxy 切出完整块时的 ts (epoch ms).
+  // 末尾不完整块 (流被截断 / 上游卡死时) 不在 sse.blocks, 标 '—'.
+  // 染色阈值: >1s 橙 (卡顿), >5s 红 (明显阻塞). list 渲染时根据 slowClass 给整行 + metaText 上色.
+  // 数据流动统计: sum(deltaMs) = proxy 实际在切 part 的累计时长.
+  //   totalElapsed = blockTs[last] - blockTs[0] = 真实首→末墙钟时长.
+  //   差值 = silent (proxy 没切出任何完整 part 的空档, 通常是上游 thinking / token 生成停滞).
+  //   这是用户最关心的"16s 总耗时但 blocks 只占 1s"问题的答案 — 一眼看清数据 vs 空档.
+  const blockTs = Array.isArray(sse.blocks) ? sse.blocks : [];
+  const lastFullIdx = blockTs.length - 1;
+  function deltaMs(i) {
+    if (i === 0) return { text: '—', ms: 0 };      // 第一个 block 无前序
+    if (i > lastFullIdx) return { text: '—', ms: 0 };  // 末尾不完整块
+    const dt = blockTs[i].ts - blockTs[i - 1].ts;
+    return { text: formatDelta(dt), ms: dt };
+  }
+  function slowClass(ms) {
+    if (ms > 5000) return { cls: 'sse-slow-err',  color: '#ff6644' };
+    if (ms > 1000) return { cls: 'sse-slow-warn', color: '#ffaa00' };
+    return { cls: '', color: '' };
+  }
+  // 每个 block 的累计 elapsed (从 blockTs[0] 到该 block 的墙钟时长) — 让用户看清"哪段是空档".
+  function elapsedMs(i) {
+    if (i > lastFullIdx) return 0;
+    return blockTs[i].ts - blockTs[0].ts;
+  }
+
+  // 摘要: 类型 + 数量 + 总字节 + 数据流动 / silent 统计
+  const summaryParts = types.map(t => `${esc(t)} × ${typeCounts[t]}`);
+  let summaryExtras = '';
+  if (blockTs.length >= 2) {
+    // 数据流动 = 各 block 间隔之和 (单 deltaMs 表示相邻 block 间 proxy 实际切 part 的耗时).
+    //   但相邻 block 之间也包含上游 silent 间隔, 因此 sumDelta ≈ 实际流动 + silent.
+    // silent = 把每个 deltaMs 中超过 500ms 的部分累加 (500ms 是正常 SSE event 间隔的上限).
+    //   这种"超过正常"的相邻间隔就是上游空档, 不算数据流动.
+    // 例: block 间隔 [50,50,14900,50,450] → 数据流动 600ms, silent 14400ms + 0ms = 14.4s.
+    let sumDelta = 0, silent = 0;
+    const SILENT_BASELINE = 500;  // 单 SSE event 间隔超过此值即视为上游 silent
+    for (let i = 1; i <= lastFullIdx; i++) {
+      const dt = blockTs[i].ts - blockTs[i - 1].ts;
+      sumDelta += dt;
+      if (dt > SILENT_BASELINE) silent += dt - SILENT_BASELINE;
+    }
+    const totalElapsed = blockTs[lastFullIdx].ts - blockTs[0].ts;  // 真实首→末
+    const dataFlow = Math.max(0, sumDelta - silent);  // 数据流动 = sumDelta - silent
+    summaryExtras = ' · 数据流动 <span style="color:#88ccff;">' + esc(formatDelta(dataFlow)) + '</span>' +
+      ' · 总跨度 ' + esc(formatDelta(totalElapsed)) +
+      (silent > 500 ? ' · 静默 <span style="color:#ffaa00;">' + esc(formatDelta(silent)) + '</span>' : '');
+  }
+  const summary = '<div class="sse-summary">' +
+    'SSE 事件块: ' + parsed.length + ' · 总字节: ' + esc(formatBytes(sse.bytesSize)) +
+    ' · ' + summaryParts.join(' · ') +
+    summaryExtras +
+    '</div>';
+
+  // 类型过滤 chip (默认全开, 点击切换) — 展开按钮移到搜索行, 这行只留过滤
+  const filterBar = '<div class="sse-filter-bar">' +
+    '<span style="color:#888;font-size:10px;">类型过滤:</span>' +
+    types.map(t => '<span class="sse-filter-chip active" data-type="' + esc(t) + '" data-on="true">' +
+      esc(t) + ' (' + typeCounts[t] + ')</span>').join('') +
+    '</div>';
+  // 搜索栏 (Ctrl+F 唤起): 实时输出框下方 / block 列表上方. 全部展开/折叠 靠右同行.
+  const searchBar = '<div class="sse-search-bar">' +
+    '<input id="sseSearch" class="sse-search-input" type="text" placeholder="搜索 #编号 / 类型 / 内容 (Ctrl+F)" autocomplete="off">' +
+    '<span id="sseSearchCount" class="sse-search-count"></span>' +
+    '<span class="sse-filter-chip" id="sseSearchPrev" title="上一个 (Shift+F3)">▲</span>' +
+    '<span class="sse-filter-chip" id="sseSearchNext" title="下一个 (F3)">▼</span>' +
+    '<span class="sse-filter-chip" id="sseExpandAll" style="margin-left:auto;">全部展开</span>' +
+    '<span class="sse-filter-chip" id="sseCollapseAll">全部折叠</span>' +
+    '</div>';
+
+  // 每条 event 默认折叠: 头行(▶ + event 名 + 长度/keys 摘要), 点开展开 JSON
+  const list = parsed.map((ev, idx) => {
+    if (ev.err) {
+      return '<div class="sse-event sse-err" data-type="parse-error" data-idx="' + idx + '">' +
+        '<div class="sse-event-head"><span class="sse-event-name">parse error</span>' +
+        '<span class="sse-event-meta">' + esc(ev.err) + '</span></div>' +
+        '<div class="sse-event-body" data-loaded="0"></div></div>';
+    }
+    const t = ev.event || 'message';
+    const dataLen = ev.data ? ev.data.length : 0;
+    // block 间隔耗时: 上色 (慢块边框 + meta 文字), 用于一眼定位卡顿位置.
+    const d = deltaMs(idx);
+    const slow = slowClass(d.ms);
+    // 累计 elapsed: 从首块到该 block 的真实墙钟时长. 用于定位空档 (例如 16s 总耗时里
+    //   跳到 elapsed=15s 才来下一段, 一眼看出 middle 14s 全是上游 silent).
+    const e = elapsedMs(idx);
+    const elapsedPrefix = (idx > lastFullIdx) ? '' : '<span style="color:#88ccff;">elapsed ' + esc(formatDelta(e)) + '</span> · ';
+    // 摘要: 距上一个 block 耗时 + 字节 (data 是 '[DONE]' / 空��仅显示耗时)
+    let metaText;
+    if (ev.data === '[DONE]') metaText = 'DONE';
+    else if (ev.data) metaText = elapsedPrefix + '+' + d.text + ' · ' + formatBytes(dataLen);
+    else metaText = elapsedPrefix + '+' + d.text + ' · empty';
+    const metaSpan = slow.color
+      ? '<span style="color:' + slow.color + ';">' + esc(metaText) + '</span>'
+      : metaText;
+    // 简短内容标识: 让用户一眼看出"这个 block 是哪种事件 + 关键字段", 不必点开 JSON.
+    //  - content_block_start: 显示 type (text/tool_use) + name (tool 名)
+    //  - content_block_delta: 显示 delta.type
+    //  - message_delta: 显示 stop_reason
+    //  - 其他: 留空, 不挤头部.
+    let contentHint = '';
+    if (ev.data && ev.data !== '[DONE]') {
+      try {
+        const _o = JSON.parse(ev.data);
+        if (_o.type === 'content_block_start' && _o.content_block) {
+          const cb = _o.content_block;
+          contentHint = cb.type + (cb.name ? ':' + cb.name : '');
+        } else if (_o.type === 'content_block_delta' && _o.delta) {
+          contentHint = _o.delta.type || '';
+        } else if (_o.type === 'message_delta' && _o.delta && _o.delta.stop_reason) {
+          contentHint = 'stop=' + _o.delta.stop_reason;
+        } else if (_o.type === 'message_start') {
+          contentHint = 'usage=' + JSON.stringify((_o.message && _o.message.usage) || _o.usage || {});
+        }
+      } catch (e) {}
+    }
+    // 块编号: 从 1 起 (更友好), 用户看到 #N 和 #M 之间间隔 20s, 一眼定位
+    const idxLabel = '#' + (idx + 1);
+    // title 提示 wall-clock 时间, 排查 silent 期具体时刻更直接
+    const tsTitle = (idx <= lastFullIdx && blockTs[idx]) ? new Date(blockTs[idx].ts).toISOString().slice(11, 19) : '';
+    // body 懒渲染: 此处不生成 renderSseJson HTML (几千 event 时省绝大多数 DOM 节点).
+    // 展开时 renderEventBody 按 list._blocks[idx] 渲染. data-loaded=0 标记未渲染, 避免重复.
+    const bodyHtml = '<div class="sse-event-body" data-loaded="0"></div>';
+    return '<div class="sse-event ' + slow.cls + '" data-type="' + esc(t) + '" data-idx="' + idx + '"' +
+      (tsTitle ? ' title="block ' + (idx + 1) + ' @ ' + tsTitle + 'Z"' : '') + '>' +
+      '<div class="sse-event-head">' +
+        '<span class="sse-event-idx" title="block 编号 (从 1 起)">' + idxLabel + '</span>' +
+        '<span class="sse-event-name">' + esc(t) + '</span>' +
+        (contentHint ? '<span class="sse-event-hint">' + esc(contentHint) + '</span>' : '') +
+        '<span class="sse-event-meta">' + metaSpan + '</span>' +
+      '</div>' +
+      bodyHtml +
+      '</div>';
+  }).join('');
+
+  // 实时输出容器: 内容由 startLivePolling 持续追加 (think 紫 / text 绿). 容器本身先占位.
+  const live = '<div class="sse-live">' +
+    '<div class="sse-live-head">▸ 实时输出 (thinking + text delta)</div>' +
+    '<div class="sse-live-body" id="sseLiveBody"></div>' +
+    '<div class="sse-live-foot" id="sseLiveFoot"></div>' +
+    '</div>';
+  // type 过滤: 每个 type 一条 CSS 规则, chip 点击只 toggle list 的 hide-<type> class,
+  // 浏览器单次 reflow 处理全部匹配元素, 避免 JS 遍历几千元素改 display.
+  const filterStyle = '<style>' + types.map(t =>
+    '#sseEventList.hide-' + cssEscapeType(t) + ' .sse-event[data-type="' + esc(t) + '"]{display:none!important}'
+  ).join('') + '</style>';
+  const html = banner + filterStyle + summary + filterBar + live + searchBar +
+    '<div id="sseEventList">' + list + '</div>' +
+    '<details style="margin-top:12px;"><summary style="cursor:pointer;color:#888;font-size:11px;">查看原始字节流</summary>' +
+    '<div class="ev-raw" style="margin-top:6px;">' + esc(raw) + '</div></details>';
+  return { html, blocks: parsed };
+}
+
+// SSE panel 交互: 折叠 / type 过滤 (委托, 一次绑定)
+function bindSsePanelInteractions(container) {
+  const list = container.querySelector('#sseEventList');
+  if (!list) return;
+
+  // SSE 搜索状态 (每次 renderEventDetail 重绑会随闭包重置)
+  let sseHits = [];
+  let sseCur = -1;
+  const searchInput = container.querySelector('#sseSearch');
+  const searchCount = container.querySelector('#sseSearchCount');
+
+  // 按 data-idx 取 _blocks[idx] 渲染 body (懒加载). 供 head click / 全部展开 / 搜索命中复用.
+  function ensureBody(evEl) {
+    const bodyEl = evEl.querySelector('.sse-event-body');
+    if (!bodyEl || bodyEl.dataset.loaded === '1') return;
+    const idx = parseInt(evEl.getAttribute('data-idx') || '', 10);
+    const blocks = list._blocks || [];
+    if (Number.isInteger(idx) && blocks[idx]) renderEventBody(bodyEl, blocks[idx]);
+  }
+
+  // 头行 click → 折叠/展开; 展开时懒渲染 body (首次才渲染, 折叠不动已渲染 body).
+  list.addEventListener('click', (e) => {
+    const head = e.target.closest('.sse-event-head');
+    if (!head) return;
+    const evEl = head.parentElement;
+    evEl.classList.toggle('open');
+    if (evEl.classList.contains('open')) ensureBody(evEl);
+  });
+
+  // 全部展开: rAF 分批 (每帧 EXPAND_BATCH 个), 几千 event 也不卡死, 渐进可见.
+  const EXPAND_BATCH = 50;
+  container.querySelector('#sseExpandAll')?.addEventListener('click', () => {
+    const evs = list.querySelectorAll('.sse-event');
+    let i = 0;
+    (function step() {
+      const end = Math.min(i + EXPAND_BATCH, evs.length);
+      for (; i < end; i++) { evs[i].classList.add('open'); ensureBody(evs[i]); }
+      if (i < evs.length) requestAnimationFrame(step);
+    })();
+  });
+  container.querySelector('#sseCollapseAll')?.addEventListener('click', () => {
+    list.querySelectorAll('.sse-event').forEach(el => el.classList.remove('open'));
+  });
+
+  // type 过滤: hiddenTypes 记录隐藏集合, chip 点击只 toggle list 的 hide-<type> class.
+  // CSS 规则 (renderSsePanel 注入) 一次性处理全部匹配元素 display, 避免 JS 遍历几千元素改 inline style.
+  const hiddenTypes = new Set();
+  container.querySelectorAll('.sse-filter-chip[data-type]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const t = chip.dataset.type;
+      const hide = !hiddenTypes.has(t);
+      if (hide) hiddenTypes.add(t); else hiddenTypes.delete(t);
+      chip.dataset.on = hide ? 'false' : 'true';
+      chip.classList.toggle('active', !hide);
+      list.classList.toggle('hide-' + cssEscapeType(t), hide);
+      // 过滤可见集变了, 若有搜索词则重跑 (命中集 = 当前可见集合中的匹配)
+      if (searchInput && searchInput.value) runSseSearch(searchInput.value);
+    });
+  });
+
+  // ===== SSE 搜索: 命中展开+高亮+滚动居中, F3/Enter/按钮循环跳转 =====
+  function updateCount() {
+    if (!searchCount) return;
+    searchCount.textContent = sseHits.length ? ((sseCur + 1) + '/' + sseHits.length) : '无匹配';
+  }
+  function focusSseHit() {
+    list.querySelectorAll('.sse-event.sse-search-current').forEach(el => el.classList.remove('sse-search-current'));
+    if (sseCur < 0 || !sseHits[sseCur]) return;
+    const el = sseHits[sseCur];
+    el.classList.add('sse-search-current');
+    el.classList.add('open');
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+  function runSseSearch(q) {
+    q = (q || '').trim();
+    if (searchCount) searchCount.textContent = '';
+    if (!q) {
+      // 空搜索: 只清命中标记, 不动 .open (尊重用户当前展开状态)
+      list.querySelectorAll('.sse-event').forEach(el => el.classList.remove('sse-search-hit', 'sse-search-current'));
+      sseHits = []; sseCur = -1; return;
+    }
+    const ql = q.toLowerCase();
+    // 编号搜索: 纯数字 → 匹配 #N (1起) 或 data-idx (0起)
+    const pureNum = /^\d+$/.test(q);
+    const numIdx = pureNum ? String(parseInt(q, 10) - 1) : '';
+    const blocks = list._blocks || [];
+    const evEls = Array.from(list.querySelectorAll('.sse-event'));
+    // 只在未被 type 过滤隐藏的 block 上搜; 匹配文本读 _blocks[idx] 原始 data/raw
+    //   (不读 DOM textContent: 既避免 reflow, 又因 body 懒渲染后 textContent 为空).
+    sseHits = evEls.filter(el => {
+      const type = el.getAttribute('data-type') || '';
+      if (hiddenTypes.has(type)) return false;
+      const idx = el.getAttribute('data-idx');
+      if (pureNum && idx === numIdx) return true;
+      const ev = (idx != null && blocks[idx]) ? blocks[idx] : null;
+      const evName = (ev && ev.event) || '';
+      const evText = ev ? (ev.data || ev.raw || '') : '';
+      return type.toLowerCase().includes(ql) || evName.toLowerCase().includes(ql) || evText.toLowerCase().includes(ql);
+    });
+    // 命中: 高亮+展开+懒渲染 body; 未匹配: 清标记+折叠 (搜索聚焦命中, 跳转时视觉一眼能看出当前位置)
+    evEls.forEach(el => {
+      const hit = sseHits.indexOf(el) !== -1;
+      el.classList.toggle('sse-search-hit', hit);
+      el.classList.remove('sse-search-current');
+      el.classList.toggle('open', hit);
+      if (hit) ensureBody(el);
+    });
+    sseCur = sseHits.length ? 0 : -1;
+    focusSseHit();
+    updateCount();
+  }
+  function nextSseHit() {
+    if (!sseHits.length) return;
+    sseCur = (sseCur + 1) % sseHits.length;
+    focusSseHit(); updateCount();
+  }
+  function prevSseHit() {
+    if (!sseHits.length) return;
+    sseCur = (sseCur - 1 + sseHits.length) % sseHits.length;
+    focusSseHit(); updateCount();
+  }
+  let searchRaf = 0;
+  if (searchInput) {
+    // input 合并到 rAF: 连续击键只跑最后一帧, 避免每键全量扫几千 event.
+    searchInput.addEventListener('input', () => {
+      const v = searchInput.value;
+      if (searchRaf) cancelAnimationFrame(searchRaf);
+      searchRaf = requestAnimationFrame(() => { searchRaf = 0; runSseSearch(v); });
+    });
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === 'F3') {
+        e.preventDefault();
+        if (e.shiftKey) prevSseHit(); else nextSseHit();
+      } else if (e.key === 'Escape') {
+        // 有值 → 清搜索 + stopPropagation (避免一次 Esc 同时关抽屉); 空值 → 放行冒泡关抽屉
+        if (searchInput.value) { e.preventDefault(); e.stopPropagation(); searchInput.value = ''; runSseSearch(''); searchInput.blur(); }
+      }
+    });
+  }
+  container.querySelector('#sseSearchNext')?.addEventListener('click', nextSseHit);
+  container.querySelector('#sseSearchPrev')?.addEventListener('click', prevSseHit);
+}
+
+// JSON 树形展示: 缩进 + 类型着色, 数组/对象递归. 字符串/数字/布尔/null 着色不同.
+// 容器对象/数组缩进 2 空格 (与 .sse-event-data 的 4 空格内边距相加视觉对齐).
+function renderSseJson(v, depth) {
+  const pad = '  '.repeat(depth + 1);
+  if (v === null) return '<span class="v-null">null</span>';
+  if (typeof v === 'boolean') return '<span class="v-bool">' + v + '</span>';
+  if (typeof v === 'number') return '<span class="v-num">' + v + '</span>';
+  if (typeof v === 'string') {
+    // 长字符串 (>80) 折叠, 避免一个 event 撑爆屏幕
+    if (v.length > 80) return '<span class="v-str">"' + esc(v.slice(0, 80)) + '"</span> <span style="color:#666;">… +' + (v.length - 80) + ' chars</span>';
+    return '<span class="v-str">"' + esc(v) + '"</span>';
+  }
+  if (Array.isArray(v)) {
+    if (v.length === 0) return '[]';
+    const items = v.map(item => pad + renderSseJson(item, depth + 1)).join(',\n');
+    return '[\n' + items + '\n' + '  '.repeat(depth) + ']';
+  }
+  if (typeof v === 'object') {
+    const keys = Object.keys(v);
+    if (keys.length === 0) return '{}';
+    const rows = keys.map(k => pad + '<span class="k">' + esc(k) + '</span>: ' + renderSseJson(v[k], depth + 1));
+    return '{\n' + rows.join(',\n') + '\n' + '  '.repeat(depth) + '}';
+  }
+  return esc(String(v));
+}
+
+function renderHeadersPanel(data) {
+  let html = '<div style="color:#00d4d4;margin-bottom:4px;">▸ Request Headers</div>';
+  html += renderHeadersList(data.req && data.req.headers);
+  if (data.resp) {
+    html += '<div style="color:#00d4d4;margin:12px 0 4px;">▸ Response Headers</div>';
+    html += renderHeadersList(data.resp.headers);
+  } else {
+    html += '<div style="color:#00d4d4;margin:12px 0 4px;">▸ Response Headers</div>';
+    html += '<div class="drawer-empty">SSE 流 (无独立响应头 / 含在 response headers 里)</div>';
+  }
+  return html || '<div class="drawer-empty">无 headers</div>';
+}
+
+function renderHeadersList(h) {
+  if (!h) return '<div class="drawer-empty">无</div>';
+  return '<div class="ev-headers">' + Object.entries(h).map(([k, v]) => {
+    return '<div class="ev-header-row"><span class="ev-header-k">' + esc(k) + ':</span> ' +
+      '<span class="ev-header-v">' + esc(v) + '</span></div>';
+  }).join('') + '</div>';
+}
+
+// 单块 SSE event 解析: event:/data: 行 → { event, data, raw }. JSON.parse 试错 (供 UI 标红).
+function parseOneSseEvent(block) {
+  const lines = block.split(/\r?\n/);
+  let eventName = null;
+  const dataLines = [];
+  for (const ln of lines) {
+    if (ln.startsWith('event:')) eventName = ln.slice(6).trim();
+    else if (ln.startsWith('data:')) dataLines.push(ln.slice(5).trim());
+  }
+  if (dataLines.length === 0) return { event: eventName, data: '', raw: block, err: null };
+  const data = dataLines.join('\n');
+  if (data === '[DONE]') return { event: eventName, data: '[DONE]', raw: block, err: null };
+  try {
+    JSON.parse(data);
+    return { event: eventName, data, raw: block, err: null };
+  } catch (e) {
+    return { event: eventName, data, raw: block, err: String(e.message || e) };
+  }
+}
+
+// CSS class 名转义: type 含特殊字符时安全 (Anthropic event type 为字母+下划线, 一般不变).
+// renderSsePanel 注入过滤 style 与 bindSsePanelInteractions toggle class 共用, 保证两端 class 名一致.
+function cssEscapeType(t) {
+  return (window.CSS && CSS.escape) ? CSS.escape(t) : String(t).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+}
+
+// SSE bytes → [{event, data, raw, err}] (split 双换行 + parseOneSseEvent).
+// renderSsePanel 与搜索/懒渲染共用, 避免重复解析.
+function parseSseBlocks(sse) {
+  if (!sse || !sse.bytes) return [];
+  return sse.bytes.split(/\r?\n\r?\n/).filter(Boolean).map(parseOneSseEvent);
+}
+
+// 懒渲染单个 event body: 按 ev 状态渲染到 bodyEl. 首次展开时调用, data-loaded=1 后跳过.
+// 严格对齐原 renderSsePanel 内联 bodyHtml 逻辑: err→raw, [DONE]/空→data, JSON→renderSseJson 树, 非JSON→data.
+function renderEventBody(bodyEl, ev) {
+  if (!bodyEl || !ev || bodyEl.dataset.loaded === '1') return;
+  if (ev.err) {
+    bodyEl.textContent = ev.raw || '';
+  } else if (ev.data && ev.data !== '[DONE]') {
+    try { bodyEl.innerHTML = renderSseJson(JSON.parse(ev.data), 0); }
+    catch (e) { bodyEl.textContent = ev.data; }
+  } else {
+    bodyEl.textContent = ev.data || '';
+  }
+  bodyEl.dataset.loaded = '1';
+}
+
+// 从 sse.bytes 提取所有 thinking/text delta, 按 SSE 顺序返回 [{kind, text}]. 解析失败/非 delta 跳过.
+// 供 live 输出区持续追加. 走标准 Anthropic content_block_delta.delta.thinking / .text 字段.
+function extractDeltas(sseBytes) {
+  if (!sseBytes) return [];
+  const blocks = sseBytes.split(/\r?\n\r?\n/).filter(Boolean);
+  const out = [];
+  for (const b of blocks) {
+    const ev = parseOneSseEvent(b);
+    if (ev.err || !ev.data || ev.data === '[DONE]') continue;
+    let obj = null;
+    try { obj = JSON.parse(ev.data); } catch (e) { continue; }
+    if (!obj || obj.type !== 'content_block_delta') continue;
+    const d = obj.delta || {};
+    // 标准字段优先; 兜底旧字段名
+    if (d.type === 'thinking_delta' && d.thinking) out.push({ kind: 'thinking', text: d.thinking });
+    else if (d.type === 'text_delta' && d.text) out.push({ kind: 'text', text: d.text });
+    else if (d.thinking) out.push({ kind: 'thinking', text: d.thinking });
+    else if (d.text) out.push({ kind: 'text', text: d.text });
+  }
+  return out;
+}
+
+// 增量追加 delta 到容器, 自动滚到底. 每段独立 span 便于着色 + 保持追加顺序.
+function appendLiveDeltas(container, deltas) {
+  if (!container || !deltas.length) return;
+  const frag = document.createDocumentFragment();
+  for (const d of deltas) {
+    const span = document.createElement('span');
+    span.className = d.kind === 'thinking' ? 'lv-think' : 'lv-text';
+    span.textContent = d.text;
+    frag.appendChild(span);
+  }
+  container.appendChild(frag);
+  container.scrollTop = container.scrollHeight;
+}
+
+function formatBytes(n) {
+  if (!Number.isFinite(n)) return '?';
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1024 / 1024).toFixed(2) + ' MB';
+}
+
+// 紧凑 ms 格式化: < 1s 用 ms, < 1m 用 s, 更大用 s 保留 1 位小数 (e.g. 60.2s)
+function formatDelta(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return '—';
+  if (ms < 1000) return ms + 'ms';
+  if (ms < 60000) return (ms / 1000).toFixed(ms < 10000 ? 2 : 1) + 's';
+  return (ms / 1000).toFixed(1) + 's';
+}
+
+async function openSessionDrawer(agentId, sid) {
+  const drawer = document.getElementById('sessionDrawer');
+  drawer.classList.add('open');
+  document.getElementById('drawerTitle').textContent = '会话时间线 · ' + (agentId || (sid ? sid.slice(0, 8) : ''));
+  document.getElementById('drawerActions').innerHTML = '';
+  const body = document.getElementById('drawerBody');
+  body.innerHTML = '<div class="drawer-loading">加载会话…</div>';
+  try {
+    const r = await fetch('/session?id=' + encodeURIComponent(sid));
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || ('HTTP ' + r.status));
+    }
+    const data = await r.json();
+    renderTimeline(data.entries || []);
+  } catch (e) {
+    body.innerHTML = '<div class="drawer-error">加载失败：' + esc(e.message) + '</div>';
+  }
+}
+
+// 折叠展开 (事件委托): 请求卡片 head ↔ 子块 (system/message) toggle.
+document.getElementById('drawerBody').addEventListener('click', (e) => {
+  // 请求卡片: 点 head 展开/收起整个请求详情
+  const promptHead = e.target.closest('.tl-prompt > .tl-head');
+  if (promptHead) {
+    promptHead.parentElement.classList.toggle('open');
+    return;
+  }
+  // 复制整段 (system / message 全文)
+  const copyBtn = e.target.closest('.tl-copy');
+  if (copyBtn) {
+    const text = copyBtn.parentElement.querySelector('.tl-full')?.textContent || '';
+    copyText(text).then(() => {
+      copyBtn.classList.add('copied');
+      copyBtn.textContent = '✓';
+      setTimeout(() => { copyBtn.classList.remove('copied'); copyBtn.textContent = '复制'; }, 1200);
+    }).catch(() => {
+      copyBtn.textContent = '失败';
+      setTimeout(() => { copyBtn.textContent = '复制'; }, 1500);
+    });
+    return;
+  }
+  // 子块 (system / 单条 message)
+  const btn = e.target.closest('.tl-toggle');
+  if (!btn) return;
+  const scope = btn.parentElement;
+  const short = scope.querySelector('.tl-short');
+  const full = scope.querySelector('.tl-full');
+  const expanded = btn.classList.toggle('on');
+  if (expanded) {
+    if (short) short.hidden = true;
+    if (full) full.hidden = false;
+    btn.textContent = '▴ 收起';
+  } else {
+    if (short) short.hidden = false;
+    if (full) full.hidden = true;
+    btn.textContent = '▸ 展开全部';
+  }
+});
+
+// 行点击 → 实时 prompt; 📜 → session 时间线; ⚡ → 断开(kill handler)
+document.getElementById('agents').addEventListener('click', (e) => {
+  if (e.target.closest('.op-btn--kill')) return;
+  const tlBtn = e.target.closest('.op-btn--tl');
+  if (tlBtn) {
+    const row = tlBtn.closest('.agent-row');
+    openSessionDrawer(row.dataset.agent || '', row.dataset.session || '');
+    return;
+  }
+  const row = e.target.closest('.agent-row');
+  if (!row) return;
+  openPromptsDrawer(row.dataset.agent || '');
+});
+
+document.getElementById('drawerClose').addEventListener('click', closeSessionDrawer);
+document.addEventListener('keydown', (e) => {
+  // Ctrl/Cmd+F: 仅 SSE 面板可见时 (抽屉开 + sse tab active) 唤起搜索框, 其余场景放行不干扰
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
+    const drawerOpen = document.getElementById('sessionDrawer').classList.contains('open');
+    const sseActive = document.querySelector('.ev-panel[data-panel="sse"].active');
+    if (drawerOpen && sseActive) {
+      const s = document.getElementById('sseSearch');
+      if (s) { e.preventDefault(); s.focus(); s.select(); }
+    }
+    return;
+  }
+  if (e.key === 'Escape') {
+    // 搜索框有值且焦点不在其上 → 先清搜索 (再 Esc 才关抽屉); 搜索框聚焦的 Esc 由其自身 keydown 处理
+    const s = document.getElementById('sseSearch');
+    if (s && s.value && document.activeElement !== s) { s.value = ''; s.dispatchEvent(new Event('input')); return; }
+    closeSessionDrawer();
+  }
+});
+// 点抽屉外空白处关闭. mousedown 委托在 document, drawer 内部子元素点击自然不命中.
+document.addEventListener('mousedown', (e) => {
+  const drawer = document.getElementById('sessionDrawer');
+  if (!drawer.classList.contains('open')) return;
+  if (drawer.contains(e.target)) return;
+  closeSessionDrawer();
+});
+
+// --- 顶部: 流请求 (HTTP 视角) + 异常事件 (系统视角) 左右分栏, 两 panel 各自独立状态 ---
+const EV_MAX_RENDER = 200;
+const EV_SEVERITY_ICON = { error: '🔴', warn: '🟠', notice: '🟡', info: '🟢' };
+const FOLLOW_THRESHOLD_PX = 24;
+// 异常事件 panel 状态 (系统视角): 数据 + 追新
+let evAll = [];
+let evCounters = { error: 0, warn: 0, notice: 0 };
+const evActive = { error: true, warn: true, notice: true };
+let evFollowing = true;       // true = 在底部自动追新; false = 反向滚停追
+let evPending = 0;            // 停追期间累积条数 (浮标显示)
+
+// 流请求 panel 状态 (HTTP 视角): 数据 + 追新
+let reqAll = [];
+let reqCounters = { all: 0, ok: 0, err: 0, pending: 0 };
+const reqActive = { all: true, ok: true, err: true };
+let reqFollowing = true;
+let reqPending = 0;
+
+function evAtBottom() {
+  const body = document.getElementById('evBody');
+  return body.scrollHeight - body.scrollTop - body.clientHeight < FOLLOW_THRESHOLD_PX;
+}
+function reqAtBottom() {
+  const body = document.getElementById('reqBody');
+  return body.scrollHeight - body.scrollTop - body.clientHeight < FOLLOW_THRESHOLD_PX;
+}
+
+function updateEvJump() {
+  const badge = document.getElementById('evJump');
+  badge.hidden = evFollowing;
+  if (!evFollowing) document.getElementById('evJumpN').textContent = evPending;
+}
+function updateReqJump() {
+  const badge = document.getElementById('reqJump');
+  badge.hidden = reqFollowing;
+  if (!reqFollowing) document.getElementById('reqJumpN').textContent = reqPending;
+}
+
+function renderEvent(ev) {
+  if (!evActive[ev.severity]) return;
+  const body = document.getElementById('evBody');
+  body.classList.add('has-events');
+  const row = document.createElement('div');
+  row.className = 'ev-row ev-row-' + ev.severity;
+  row.dataset.type = ev.type;
+  // ★ cid 透传: 详情抽屉 (openEventDrawer) 用它 fetch /event/detail 取完整 HTTP 流.
+  //   proxy 端 recordEvent 自动 merge correlationId → ev.detail.correlationId.
+  if (ev.detail && ev.detail.correlationId) {
+    row.dataset.cid = ev.detail.correlationId;
+    row.tabIndex = 0;        // 键盘可达 (Enter / Space 打开)
+    row.setAttribute('role', 'button');
+  }
+  const ts = ev.ts ? fmtTime(ev.ts) : '--:--:--';
+  const agent = ev.agentId ? esc(ev.agentId) : '<unknown>';
+  const count = (ev.count && ev.count > 1) ? '×' + ev.count : '';
+  row.innerHTML =
+    '<span class="ev-ts">' + ts + '</span>' +
+    '<span class="ev-icon">' + (EV_SEVERITY_ICON[ev.severity] || '⚪') + '</span>' +
+    '<span class="ev-agent" title="' + agent + '">' + agent + '</span>' +
+    '<span class="ev-type">' + esc(ev.type || '') + '</span>' +
+    '<span class="ev-msg" title="' + esc(ev.message || '') + '">' + esc(ev.message || '') + '</span>' +
+    '<span class="ev-count">' + count + '</span>';
+  body.appendChild(row);
+  while (body.children.length > EV_MAX_RENDER) body.removeChild(body.firstChild);
+  // 追新模式 → 自动滚到底; 反向滚模式 → 不动 scrollTop, 让用户继续看
+  if (evFollowing) {
+    body.scrollTop = body.scrollHeight;
+  } else {
+    evPending++;
+    updateEvJump();
+  }
+}
+
+function updateChipCounters() {
+  for (const sev of ['error', 'warn', 'notice']) {
+    const el = document.getElementById('evCount' + sev[0].toUpperCase() + sev.slice(1));
+    if (el) el.textContent = evCounters[sev];
+  }
+}
+
+function ingestEvent(ev) {
+  if (!ev || !ev.severity || !ev.type) return;
+  evCounters[ev.severity] = (evCounters[ev.severity] || 0) + 1;
+  evAll.push(ev);
+  if (evAll.length > EV_MAX_RENDER) evAll.shift();
+  updateChipCounters();
+  renderEvent(ev);
+}
+
+// --- 流请求渲染 ---
+function classifyRequest(req) {
+  // 进行中 (pending) 判定:
+  //   SSE 流 — 上游响应头一到就是 200, 但字节可能还在输出. 用 ended (流 end 落定) 判,
+  //            否则流式中段 (status=200, 字节还在打) 被误判 ok (绿色).
+  //   非 SSE  — statusCode=0 (响应头未到) 即 pending.
+  // 已结束: 2xx/3xx=ok, 其他=err.
+  const s = req.statusCode || 0;
+  const pending = req.isSSE ? !req.ended : s === 0;
+  if (pending) return 'pending';
+  return (s >= 200 && s < 400) ? 'ok' : 'err';
+}
+// req-row class: cat (pending/ok/err) 驱动 border 色; pending 且 phase='think' 叠加紫色覆盖.
+// text / 等首字 (phase=null) → 默认橙; 完成态 (ok/err) 色不变. renderRequest + updateRequestRow 共用.
+function reqRowClass(cat, phase) {
+  return 'req-row req-row-' + cat +
+    (cat === 'pending' && phase === 'think' ? ' req-phase-think' : '');
+}
+// agent 列显示: 真 agentId 优先 (header 解析出的 session:main/sub); unknown/null → trace 短码兜底,
+// 让每行有唯一标识 (cid 前 8 位, 完整 cid 在详情抽屉 copy-trace 按钮可复制).
+function reqAgentLabel(req) {
+  const has = req && req.agentId && req.agentId !== 'unknown';
+  const cid = String((req && req.cid) || '');
+  return has
+    ? { text: req.agentId, title: req.agentId }
+    : { text: '#' + cid.slice(0, 8), title: 'trace: ' + cid };
+}
+
+function renderRequest(req) {
+  const cat = classifyRequest(req);
+  // pending (进行中) 归 "全部" chip: all 开则显示; ok/err 跟各自 chip.
+  const visible = (cat === 'pending') ? reqActive.all : reqActive[cat];
+  if (!visible) return;
+  const body = document.getElementById('reqBody');
+  const row = document.createElement('div');
+  row.className = reqRowClass(cat, req.phase);
+  row.dataset.cid = req.cid;
+  row.dataset.status = String(req.statusCode || 0);
+  row.tabIndex = 0;
+  row.setAttribute('role', 'button');
+  const ts = req.ts ? fmtTime(req.ts) : '--:--:--';
+  const _ag = reqAgentLabel(req);
+  const sizeBytes = req.sseBytesSize || req.respBodySize || 0;
+  const sizeText = sizeBytes > 0 ? esc(formatBytes(sizeBytes)) : '';
+  const statusText = req.statusCode ? String(req.statusCode) : '...';
+  const method = req.method || '?';
+  const url = req.url || '';
+  const sseTag = req.isSSE ? ' [SSE]' : '';
+  // 首字耗时 (TTFB): SSE=第一个内容 delta 到 / 非SSE=响应头到 - 请求开始. 未到 → '—'.
+  // 总耗时: 流 end → 精确; 流进行中 → 估算 (sumary 里的 totalMs 用 Date.now()-ts 算, 流未结束时为估算值).
+  // 耗时分级: 流进行中=橙 (live, 一律); 结束时按 ms / 1s / 10s / 30s / 5m 分级 (其中 < 1s 一律绿).
+  const ttfbText = Number.isFinite(req.firstByteMs) ? esc(formatIdle(req.firstByteMs)) : '—';
+  const totalText = Number.isFinite(req.totalMs) ? esc(formatIdle(req.totalMs)) : '—';
+  const totalClass = totalColorClass(req.totalMs, cat === 'pending' || req.statusCode === 0);
+  row.innerHTML =
+    '<span class="req-ts">' + ts + '</span>' +
+    '<span class="req-status">' + esc(statusText) + '</span>' +
+    '<span class="req-method">' + esc(method) + sseTag + '</span>' +
+    '<span class="req-url" title="' + esc(url) + '">' + esc(url) + '</span>' +
+    '<span class="req-agent" title="' + esc(_ag.title) + '">' + esc(_ag.text) + '</span>' +
+    '<span class="req-ttfb">' + ttfbText + '</span>' +
+    '<span class="' + totalClass + '">' + totalText + '</span>' +
+    '<span class="req-size">' + sizeText + '</span>';
+  body.appendChild(row);
+  while (body.children.length > EV_MAX_RENDER) body.removeChild(body.firstChild);
+  body.classList.add('has-events');
+  if (reqFollowing) body.scrollTop = body.scrollHeight;
+  else { reqPending++; updateReqJump(); }
+}
+
+// 原地更新已有流请求行: 只改 status / size / ttfb / total / 分类, 不重建 DOM (保持位置 + hover/滚动状态).
+// 流式更新 (同 cid size 持续增长) 用它, 避免旧行 remove + 新行 append 导致行跳到底部.
+// total 颜色: 流进行中 → 橙 (估算); 流结束 → 默认 (精确).
+function updateRequestRow(row, req) {
+  const cat = classifyRequest(req);
+  const visible = (cat === 'pending') ? reqActive.all : reqActive[cat];
+  row.className = reqRowClass(cat, req.phase);
+  row.dataset.status = String(req.statusCode || 0);
+  const statusEl = row.querySelector('.req-status');
+  if (statusEl) statusEl.textContent = req.statusCode ? String(req.statusCode) : '...';
+  // agentId 回填后重广播 → 原地刷新 agent 列 (unknown 行也会更新成真值或 trace 短码).
+  const _ag = reqAgentLabel(req);
+  const agentEl = row.querySelector('.req-agent');
+  if (agentEl) { agentEl.textContent = _ag.text; agentEl.title = _ag.title; }
+  const sizeBytes = req.sseBytesSize || req.respBodySize || 0;
+  const sizeEl = row.querySelector('.req-size');
+  if (sizeEl) sizeEl.textContent = sizeBytes > 0 ? formatBytes(sizeBytes) : '';
+  const ttfbEl = row.querySelector('.req-ttfb');
+  if (ttfbEl) ttfbEl.textContent = Number.isFinite(req.firstByteMs) ? formatIdle(req.firstByteMs) : '—';
+  const totalEl = row.querySelector('.req-total');
+  if (totalEl) {
+    totalEl.textContent = Number.isFinite(req.totalMs) ? formatIdle(req.totalMs) : '—';
+    totalEl.className = totalColorClass(req.totalMs, cat === 'pending' || req.statusCode === 0);
+  }
+  row.style.display = visible ? '' : 'none';
+}
+
+// 总耗时分级着色: 流进行中一律橙 (live, 提示估算中); 结束时按阈值分级.
+// 阈值 (ms): <1s 一律绿 (毫秒级); 1s/10s/30s/5m 四档.
+function totalColorClass(totalMs, isLive) {
+  if (isLive) return 'req-total live';
+  if (!Number.isFinite(totalMs)) return 'req-total';           // 未知 → 默认
+  if (totalMs < 1000)  return 'req-total f-fast';             // < 1s 绿
+  if (totalMs < 10000) return 'req-total f-ok';               // 1s ~ 10s  默认灰
+  if (totalMs < 30000) return 'req-total f-warn';             // 10s ~ 30s 黄
+  if (totalMs < 300000) return 'req-total f-slow';            // 30s ~ 5m  橙
+  return 'req-total f-error';                                  // > 5m     红
+}
+
+function updateRequestChipCounters() {
+  for (const k of ['all', 'ok', 'err']) {
+    const el = document.getElementById('reqCount' + k[0].toUpperCase() + k.slice(1));
+    if (el) el.textContent = reqCounters[k];
+  }
+}
+
+function ingestRequest(req) {
+  if (!req || !req.cid) return;
+  // 去重: 同一 cid 只保留最新 summary (请求进行中 statusCode=0, 完成后 SSE 推 statusCode=200 的新条目)
+  const cat = classifyRequest(req);
+  const existingIdx = reqAll.findIndex(r => r.cid === req.cid);
+  if (existingIdx >= 0) {
+    const old = reqAll[existingIdx];
+    const oldCat = classifyRequest(old);
+    // 状态变更: pending → ok/err, 计数器从 pending 移到新分类
+    reqCounters[oldCat] = Math.max(0, reqCounters[oldCat] - 1);
+    reqCounters[cat]++;
+    reqAll[existingIdx] = req;
+  } else {
+    reqCounters.all++;
+    reqCounters[cat]++;
+    reqAll.push(req);
+  }
+  if (reqAll.length > EV_MAX_RENDER) reqAll.shift();
+  updateRequestChipCounters();
+  // 同 cid 已有行 → 原地更新 status/size/分类, 不移动位置 (流式更新时行不跳到底部, 不打断滚动).
+  // 新 cid → renderRequest 追加新行到底部.
+  const oldRow = document.querySelector('.req-row[data-cid="' + req.cid + '"]');
+  if (oldRow) updateRequestRow(oldRow, req);
+  else renderRequest(req);
+}
+
+// chip 切换 → 重渲染 (用 evAll 内存回放)
+document.querySelectorAll('#evChips .event-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    const sev = chip.dataset.sev;
+    evActive[sev] = !evActive[sev];
+    chip.dataset.on = evActive[sev] ? 'true' : 'false';
+    const body = document.getElementById('evBody');
+    body.replaceChildren();
+    const filtered = evAll.filter(e => evActive[e.severity]);
+    if (filtered.length === 0) {
+      body.classList.remove('has-events');
+      evPending = 0;
+      updateEvJump();
+      return;
+    }
+    for (const ev of filtered) renderEvent(ev);
+  });
+});
+
+// 流请求 chip 切换 (status)
+document.querySelectorAll('#reqChips .event-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    const k = chip.dataset.status;
+    reqActive[k] = !reqActive[k];
+    chip.dataset.on = reqActive[k] ? 'true' : 'false';
+    const body = document.getElementById('reqBody');
+    body.replaceChildren();
+    reqPending = 0;
+    updateReqJump();
+    for (const r of reqAll) renderRequest(r);
+  });
+});
+
+// 反向滚动检测: 用户向上滚 → 停止追新, 浮标显示累积数. 滚到底 → 自动恢复追新, 清零累积.
+// 两 panel 各自独立滚动状态 (流请求 / 异常事件 互不影响).
+document.getElementById('evBody').addEventListener('scroll', () => {
+  const atBottom = evAtBottom();
+  if (atBottom && !evFollowing) { evFollowing = true; evPending = 0; updateEvJump(); }
+  else if (!atBottom && evFollowing) { evFollowing = false; updateEvJump(); }
+});
+document.getElementById('reqBody').addEventListener('scroll', () => {
+  const atBottom = reqAtBottom();
+  if (atBottom && !reqFollowing) { reqFollowing = true; reqPending = 0; updateReqJump(); }
+  else if (!atBottom && reqFollowing) { reqFollowing = false; updateReqJump(); }
+});
+
+// 点浮标 → 滚到底 (顺势触发 scroll listener 恢复追新)
+document.getElementById('evJump').addEventListener('click', () => {
+  const body = document.getElementById('evBody');
+  body.scrollTop = body.scrollHeight;
+});
+document.getElementById('reqJump').addEventListener('click', () => {
+  const body = document.getElementById('reqBody');
+  body.scrollTop = body.scrollHeight;
+});
+
+// 清空本地视图: evAll 内存 + 计数 + DOM. proxy 端 ring 由 /events/clear 清, 之后通过
+// SSE 'clear' 命名事件通知所有订阅端同步, 保证多 tab / 多 dashboard 视图一致.
+function clearLocalEvents() {
+  evAll = [];
+  evCounters = { error: 0, warn: 0, notice: 0 };
+  evPending = 0;
+  const body = document.getElementById('evBody');
+  body.replaceChildren();
+  body.classList.remove('has-events');
+  updateChipCounters();
+  updateEvJump();
+}
+
+function clearLocalRequests() {
+  reqAll = [];
+  reqCounters = { all: 0, ok: 0, err: 0 };
+  reqPending = 0;
+  const body = document.getElementById('reqBody');
+  body.replaceChildren();
+  body.classList.remove('has-events');
+  updateRequestChipCounters();
+  updateReqJump();
+}
+
+document.getElementById('evClear').addEventListener('click', async () => {
+  try { await fetch('/events/clear', { method: 'POST' }); } catch (e) {}
+  clearLocalEvents();
+});
+document.getElementById('reqClear').addEventListener('click', async () => {
+  try { await fetch('/requests/clear', { method: 'POST' }); } catch (e) {}
+  clearLocalRequests();
+});
+
+// EventSource: 浏览器原生自动重连. proxy 端 /events/stream 推送.
+function startEventStream() {
+  let es;
+  try {
+    es = new EventSource('/events/stream');
+  } catch (e) { return; }
+  es.onmessage = (msg) => {
+    try {
+      const ev = JSON.parse(msg.data);
+      ingestEvent(ev);
+    } catch (e) {}
+  };
+  // 命名事件: proxy 端 _broadcastClear() 推送 'event: clear' → 同步清本地视图.
+  // (默认 onmessage 不会触发命名事件, 必须 addEventListener)
+  es.addEventListener('clear', () => clearLocalEvents());
+  // onerror: 浏览器自动重连, 不需手动. 但要保证 es 引用保留不被 GC.
+  es.onerror = () => {};
+  window.__evEs = es;
+}
+startEventStream();
+
+// --- SSE 订阅: 流请求 ---
+function startRequestStream() {
+  let es;
+  try { es = new EventSource('/requests/stream'); } catch (e) { return; }
+  es.onmessage = (msg) => {
+    try { ingestRequest(JSON.parse(msg.data)); } catch (e) {}
+  };
+  es.addEventListener('clear', () => clearLocalRequests());
+  es.onerror = () => {};
+  window.__reqEs = es;
+}
+startRequestStream();
+
+// --- 流请求 / 异常事件列表高度拖动 ---
+// 默认 110px (与 .event-bar-body.has-events 一致), 用户拖动后存 localStorage, 跨刷新保留.
+// 范围: 60 ~ 60vh (太小看不出, 太大盖住 agent 行).
+function applyBarHeight(px) {
+  // 左右两 panel 的 body 同高, 一个拖动条同步调两边
+  for (const id of ['reqBody', 'evBody']) {
+    const body = document.getElementById(id);
+    if (body) body.style.height = px + 'px';
+  }
+}
+function loadBarHeight() {
+  try {
+    const v = parseInt(localStorage.getItem('cc.eventBarHeight'), 10);
+    if (Number.isFinite(v) && v >= 60 && v <= window.innerHeight * 0.6) {
+      applyBarHeight(v);
+      return true;
+    }
+  } catch (e) {}
+  return false;
+}
+function saveBarHeight(px) {
+  try { localStorage.setItem('cc.eventBarHeight', String(Math.round(px))); } catch (e) {}
+}
+(function initResizer() {
+  const reqBody = document.getElementById('reqBody');
+  const evBody = document.getElementById('evBody');
+  const resizer = document.getElementById('barResizer');
+  if (!reqBody || !evBody || !resizer) return;
+  // 加载持久化高度 (两 body 同高, has-events 由渲染逻辑设)
+  if (loadBarHeight()) {
+    reqBody.classList.add('has-events');
+    evBody.classList.add('has-events');
+  }
+  // 任一 body 有事件 → 显示 resizer; 两个都空 → 隐藏 (避免没列表还显示拖动条)
+  const syncVisible = () => {
+    const has = reqBody.classList.contains('has-events') || evBody.classList.contains('has-events');
+    resizer.style.display = has ? '' : 'none';
+  };
+  syncVisible();
+  // has-events 由 renderEvent / renderRequest / clearX 设, 用 MutationObserver 监听两 body 同步
+  new MutationObserver(syncVisible).observe(reqBody, { attributes: true, attributeFilter: ['class'] });
+  new MutationObserver(syncVisible).observe(evBody, { attributes: true, attributeFilter: ['class'] });
+  // 拖动: mousedown 在 resizer, mousemove 同步改两 body 高度, mouseup 存盘
+  let startY = 0, startH = 0, dragging = false;
+  resizer.addEventListener('mousedown', (e) => {
+    dragging = true;
+    startY = e.clientY;
+    startH = reqBody.offsetHeight;
+    document.body.classList.add('dragging-resizer');
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    // 拖下 = 高度变大 (resizer 在 body 下, 鼠标向下拉让 body 增高)
+    const dh = e.clientY - startY;
+    const next = Math.max(60, Math.min(window.innerHeight * 0.6, startH + dh));
+    applyBarHeight(next);
+  });
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.classList.remove('dragging-resizer');
+    saveBarHeight(reqBody.offsetHeight);
+  });
+})();
+
+// --- HTTP 详情抽屉: 点 ev-row / req-row → 调 /event/detail?cid= → 渲染 Request/Response/SSE/Headers tabs ---
+// 复用 #sessionDrawer 容器 (与 openSessionDrawer / openPromptsDrawer 互斥展示).
+// 两 panel 各自委托 (evBody 绑 ev-row, reqBody 绑 req-row), 动态插入 (live + chip 重放) 都生效.
+function bindDrawerOpen(root) {
+  root.addEventListener('click', (e) => {
+    const row = e.target.closest('.ev-row') || e.target.closest('.req-row');
+    if (!row || !row.dataset.cid) return;
+    openEventDrawer(row.dataset.cid, row);
+  });
+  root.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const row = e.target.closest('.ev-row') || e.target.closest('.req-row');
+    if (!row || !row.dataset.cid) return;
+    e.preventDefault();
+    openEventDrawer(row.dataset.cid, row);
+  });
+}
+bindDrawerOpen(document.getElementById('evBody'));
+bindDrawerOpen(document.getElementById('reqBody'));
+
+// Dev 热加载: 探测 /__dev_mtime__(生产不挂返回404), 存在则每1s轮询, mtime变→自动reload
+(async () => {
+  try {
+    const probe = await fetch('/__dev_mtime__');
+    if (!probe.ok) return;
+    let last = (await probe.json()).mtime;
+    setInterval(async () => {
+      try {
+        const r = await fetch('/__dev_mtime__');
+        if (!r.ok) return;
+        const m = (await r.json()).mtime;
+        if (m !== last) location.reload();
+      } catch (e) {}
+    }, 1000);
+  } catch (e) {}
+})();
+</script>
+</body>
+</html>

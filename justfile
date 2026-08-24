@@ -2,11 +2,10 @@
 # 跨平台兼容 (Win/macOS/Linux)：环境变量统一用 just 的 export 注入子进程，
 # 不依赖任何 shell 语法 (sh/bash/zsh/cmd/powershell 均可执行)。
 
-# Windows 用 cmd.exe（PowerShell/cmd 无 sh）；macOS/Linux 用默认 sh（显式声明）
-[windows]
-set shell := ["cmd", "/C"]
-
-[unix]
+# Windows 用 cmd.exe（PowerShell/cmd 无 sh）；macOS/Linux 用 sh（显式声明）
+# 平台属性 [windows]/[unix] 不能加在 set 上（报 Extraneous attribute），
+# 跨平台正确写法：windows-shell 仅 Windows 生效，shell 管其余平台
+set windows-shell := ["cmd", "/C"]
 set shell := ["sh", "-cu"]
 
 # electron-builder 打包工具链镜像（国内加速 GitHub 下载；仅 dist-* 命令消费，其他 recipe 无副作用）
@@ -36,6 +35,8 @@ dist-win:
 # 构建 macOS dmg (压缩 ~95M，自带拖拽安装界面) + ad-hoc 自签 (afterPack 自动注入)
 # 产物: dist/Claude会话耗时分析-<version>-arm64.dmg
 # 分发: 对方双击 dmg → 拖入 Applications → 首次右键→打开→确认 (ad-hoc 签名限制)
+# 仅 mac 可跑（electron-builder mac 打包不支持跨平台；bash 块 Win 上也无解释器）
+[macos]
 dist-mac:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -59,9 +60,9 @@ dist-linux:
 dist-zip:
     node build/pack-zip.mjs
 
-# 清理打包产物
+# 清理打包产物（node fs 实现，Win cmd 无 rm）
 clean:
-    rm -rf dist
+    npm run clean
 
 # 预览构建产物
 preview:

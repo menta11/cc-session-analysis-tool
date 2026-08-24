@@ -9,6 +9,7 @@ import { runClaudeStream } from './claudeCli'
 import { buildAnalyzeRequest } from '../../core/ai/analyzeRequest'
 import type { Session } from '../../core/parser/types'
 import { openTerminal } from './terminal'
+import { initMonitor } from './monitorHost'
 
 function projectsRoot(): string {
   return join(app.getPath('home'), '.claude', 'projects')
@@ -51,6 +52,9 @@ function setMenu(win: BrowserWindow): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
+// 主窗口引用：monitorHost 的托盘/悬浮窗切换需要读写它
+let mainWin: BrowserWindow | null = null
+
 function createWindow(): void {
   const win = new BrowserWindow({
     width: 1400,
@@ -60,6 +64,10 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  })
+  mainWin = win
+  win.on('closed', () => {
+    mainWin = null
   })
 
   setMenu(win)
@@ -130,6 +138,10 @@ app.whenReady().then(() => {
   })
 
   createWindow()
+  initMonitor(
+    () => mainWin,
+    () => createWindow(),
+  )
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

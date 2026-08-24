@@ -48,7 +48,7 @@
 flowchart LR
   subgraph APP["Electron 桌面应用"]
     UI["渲染层 React
-会话列表 · 大纲树+甘特 · 详情 · AI报告"]
+会话列表 · 大纲树+甘特 </br> 详情 · AI报告"]
     MAIN["主进程
 IPC · 文件编排 · 菜单/导入"]
     CORE["core 分析内核（纯 TS）

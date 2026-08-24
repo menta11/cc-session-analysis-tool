@@ -1,7 +1,18 @@
 import { useMemo, useRef, useState } from 'react'
 import type { SessionRef } from '../../core/discovery/scan'
 import { decodeProjectDir } from '../../core/discovery/projectDir'
-import { fmtRelative, fmtSize } from '../../core/view/format'
+import { fmtRelative, fmtSize, timeBucketLabel } from '../../core/view/format'
+
+type ListView = 'project' | 'timeline'
+const VIEW_STORAGE_KEY = 'ccsa-session-view'
+
+function getInitialView(): ListView {
+  try {
+    return localStorage.getItem(VIEW_STORAGE_KEY) === 'timeline' ? 'timeline' : 'project'
+  } catch {
+    return 'project'
+  }
+}
 
 /** 复制文本到剪贴板，返回是否成功（Electron 渲染进程支持 navigator.clipboard） */
 async function copyText(text: string): Promise<boolean> {
@@ -19,6 +30,7 @@ export function SessionList(props: {
   selectedPath?: string
 }): JSX.Element {
   const [query, setQuery] = useState('')
+  const [view, setView] = useState<ListView>(getInitialView)
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const [copiedTip, setCopiedTip] = useState<string | null>(null)
   const copiedTimerRef = useRef<number | null>(null)
@@ -57,17 +69,85 @@ export function SessionList(props: {
 
   const toggle = (p: string): void => setOpen((o) => ({ ...o, [p]: !o[p] }))
 
+  // 时间线分桶：filtered 已按 mtime 倒序, 顺序遍历切连续桶
+  const timelineGroups = useMemo(() => {
+    const out: [string, SessionRef[]][] = []
+    for (const s of filtered) {
+      const label = timeBucketLabel(s.mtimeMs)
+      const last = out[out.length - 1]
+      if (last && last[0] === label) last[1].push(s)
+      else out.push([label, [s]])
+    }
+    return out
+  }, [filtered])
+
+  const switchView = (v: ListView): void => {
+    setView(v)
+    try {
+      localStorage.setItem(VIEW_STORAGE_KEY, v)
+    } catch {
+      /* 隐私模式等写入失败可忽略 */
+    }
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <input
-        className="input"
-        placeholder="搜会话 ID 或目录…"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        style={{ margin: 'var(--sp-2)' }}
-      />
+      <div style={{ display: 'flex', gap: 'var(--sp-2)', margin: 'var(--sp-2)', alignItems: 'center' }}>
+        <input
+          className="input"
+          placeholder="搜会话 ID 或目录…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          style={{ flex: 1, margin: 0, minWidth: 0 }}
+        />
+        <div style={viewToggleStyle} role="tablist" aria-label="列表视图">
+          <button
+            type="button"
+            style={view === 'project' ? viewBtnActiveStyle : viewBtnStyle}
+            onClick={() => switchView('project')}
+            title="按项目目录分组"
+            role="tab"
+            aria-selected={view === 'project'}
+          >
+            项目
+          </button>
+          <button
+            type="button"
+            style={view === 'timeline' ? viewBtnActiveStyle : viewBtnStyle}
+            onClick={() => switchView('timeline')}
+            title="按时间倒序平铺"
+            role="tab"
+            aria-selected={view === 'timeline'}
+          >
+            时间线
+          </button>
+        </div>
+      </div>
       <div style={{ flex: 1, overflow: 'auto' }}>
-        {groups.map(([proj, sess]) => (
+        {view === 'timeline'
+          ? timelineGroups.map(([label, sess]) => (
+              <div key={label}>
+                <div className="row" onClick={() => toggle(label)} style={bucketHeaderStyle}>
+                  <Chevron open={!!open[label]} />
+                  <span>
+                    {label} <span style={{ fontWeight: 400 }}>({sess.length})</span>
+                  </span>
+                </div>
+                {open[label] !== false
+                  ? sess.map((s) => (
+                      <Row
+                        key={s.path}
+                        s={s}
+                        onSelect={props.onSelect}
+                        selected={props.selectedPath === s.path}
+                        onCopy={handleCopy}
+                        showProject
+                      />
+                    ))
+                  : null}
+              </div>
+            ))
+          : groups.map(([proj, sess]) => (
           <div key={proj}>
             <div
               className="row"
@@ -110,6 +190,7 @@ export function SessionList(props: {
                 <span
                   onContextMenu={(e) => {
                     e.preventDefault()
+                    e.stopPropagation()
                     handleCopy(groupSub(proj, sess), '已复制完整路径')
                   }}
                   title="右键复制完整路径"
@@ -128,7 +209,7 @@ export function SessionList(props: {
               </span>
               <span style={{ color: 'var(--text-faint)', fontWeight: 400 }}>({sess.length})</span>
             </div>
-            {open[proj]
+            {open[proj] !== false
               ? sess.map((s) => (
                   <Row
                     key={s.path}
@@ -156,6 +237,8 @@ function Row(props: {
   onSelect: (p: string) => void
   selected: boolean
   onCopy: (text: string, tip: string) => void
+  /** 时间线视图下无项目分组上下文, 行内补显示项目名 */
+  showProject?: boolean
 }): JSX.Element {
   return (
     <div
@@ -171,6 +254,7 @@ function Row(props: {
       <div
         onContextMenu={(e) => {
           e.preventDefault()
+          e.stopPropagation()
           props.onCopy(props.s.sessionId, '已复制会话 ID')
         }}
         title={`右键复制会话 ID：${props.s.sessionId}`}
@@ -182,9 +266,83 @@ function Row(props: {
         <span>{fmtRelative(props.s.mtimeMs)}</span>
         <span>·</span>
         <span>{fmtSize(props.s.sizeBytes)}</span>
+        {props.showProject ? (
+          <>
+            <span>·</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {basename(props.s.cwd ?? decodeProjectDir(props.s.project))}
+            </span>
+          </>
+        ) : null}
       </div>
     </div>
   )
+}
+
+/** 视图切换（项目/时间线）小分段控件 */
+const viewToggleStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  border: '1px solid var(--border)',
+  borderRadius: 'var(--r-sm)',
+  overflow: 'hidden',
+  flexShrink: 0,
+}
+
+const viewBtnStyle: React.CSSProperties = {
+  padding: '4px 8px',
+  border: 'none',
+  background: 'var(--bg-elevated)',
+  color: 'var(--text-secondary)',
+  fontSize: 'var(--fs-xs)',
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
+}
+
+const viewBtnActiveStyle: React.CSSProperties = {
+  ...viewBtnStyle,
+  background: 'var(--accent)',
+  color: 'var(--on-accent)',
+  fontWeight: 600,
+}
+
+/** 时间线分桶标题行：可点击折叠（默认展开） */
+const bucketHeaderStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 'var(--sp-1)',
+  padding: '6px 10px',
+  background: 'var(--bg-active)',
+  fontWeight: 600,
+  fontSize: 'var(--fs-sm)',
+  borderBottom: '1px solid var(--border)',
+  color: 'var(--text-secondary)',
+  position: 'sticky',
+  top: 0,
+  cursor: 'pointer',
+}
+
+/** 复制成功提示：左下角悬浮气泡，1 秒后消失 */
+const copiedTipStyle: React.CSSProperties = {
+  position: 'fixed',
+  left: 'var(--sp-3)',
+  bottom: 'var(--sp-3)',
+  padding: '6px 12px',
+  background: 'var(--accent)',
+  color: 'var(--on-accent)',
+  borderRadius: 'var(--r-sm)',
+  fontSize: 'var(--fs-sm)',
+  fontWeight: 600,
+  boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+  zIndex: 1000,
+  pointerEvents: 'none',
+  animation: 'fadeInOut 1s ease',
+}
+
+/** 会话标题三级降级：aiTitle → 首条 user prompt（截断 40 字）→ sessionId 前 12 位 */
+function sessionTitle(s: SessionRef): string {
+  if (s.aiTitle) return s.aiTitle
+  if (s.userPrompt) return s.userPrompt.length > 40 ? `${s.userPrompt.slice(0, 40)}…` : s.userPrompt
+  return `${s.sessionId.slice(0, 12)}…`
 }
 
 /** 分组标题：优先显示 cwd 的末尾目录名（如「请假审批」），否则回退到解码目录名的末尾 */
@@ -203,30 +361,6 @@ function groupSub(proj: string, sess: SessionRef[]): string {
 function basename(p: string): string {
   const parts = p.replace(/[\\/]+$/, '').split(/[\\/]/)
   return parts[parts.length - 1] || p
-}
-
-/** 会话标题三级降级：aiTitle → 首条 user prompt（截断 40 字）→ sessionId 前 12 位 */
-function sessionTitle(s: SessionRef): string {
-  if (s.aiTitle) return s.aiTitle
-  if (s.userPrompt) return s.userPrompt.length > 40 ? `${s.userPrompt.slice(0, 40)}…` : s.userPrompt
-  return `${s.sessionId.slice(0, 12)}…`
-}
-
-/** 复制成功提示：左下角悬浮气泡，1 秒后消失 */
-const copiedTipStyle: React.CSSProperties = {
-  position: 'fixed',
-  left: 'var(--sp-3)',
-  bottom: 'var(--sp-3)',
-  padding: '6px 12px',
-  background: 'var(--accent)',
-  color: 'var(--on-accent)',
-  borderRadius: 'var(--r-sm)',
-  fontSize: 'var(--fs-sm)',
-  fontWeight: 600,
-  boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-  zIndex: 1000,
-  pointerEvents: 'none',
-  animation: 'fadeInOut 1s ease',
 }
 
 function Chevron(props: { open: boolean }): JSX.Element {

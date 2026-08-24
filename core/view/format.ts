@@ -55,3 +55,19 @@ export function fmtTs(ts: number): string {
   const mi = String(d.getMinutes()).padStart(2, '0')
   return `${mm}-${dd} ${hh}:${mi}`
 }
+
+/** 时间线分桶标签：今天 / 昨天 / 本周 / 本月 / 更早（按本地自然日切天，非 24h 滚动窗口）。 */
+export function timeBucketLabel(tsMs: number, nowMs: number = Date.now()): string {
+  const startOfDay = (t: number): number => {
+    const d = new Date(t)
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  }
+  const dayDiff = Math.round((startOfDay(nowMs) - startOfDay(tsMs)) / 86_400_000)
+  if (dayDiff <= 0) return '今天'
+  if (dayDiff === 1) return '昨天'
+  if (dayDiff < 7) return '本周'
+  const ts = new Date(tsMs)
+  const now = new Date(nowMs)
+  if (ts.getFullYear() === now.getFullYear() && ts.getMonth() === now.getMonth()) return '本月'
+  return '更早'
+}

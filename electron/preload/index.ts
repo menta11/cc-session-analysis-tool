@@ -22,4 +22,17 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.removeListener('session:import', listener)
     }
   },
+  getMonitorPort: () => ipcRenderer.invoke('monitor:get-port'),
+  pingMonitor: () => ipcRenderer.invoke('monitor:ping'),
+  enterFloatMode: () => ipcRenderer.invoke('monitor:enter-float'),
+})
+
+// cc-monitor 悬浮窗 (mini.html, 加载自 proxy http://localhost:port) 的桥:
+// 与 cc-monitor 原版 preload 同名同参, dashboard.html 悬浮框按钮也走它 (直连窗口时).
+contextBridge.exposeInMainWorld('ccMonitor', {
+  enterFloatMode: () => ipcRenderer.invoke('monitor:enter-float'),
+  backToDashboard: () => ipcRenderer.invoke('monitor:back-to-dashboard'),
+  resizeFloat: (w: number, h: number) => ipcRenderer.invoke('monitor:resize-float', { w, h }),
+  floatDragStart: (x: number, y: number) => ipcRenderer.send('monitor:float-drag-start', x, y),
+  floatDragMove: (x: number, y: number) => ipcRenderer.send('monitor:float-drag-move', x, y),
 })

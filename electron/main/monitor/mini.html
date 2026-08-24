@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>cc-monitor float</title>
+<style>
+  :root {
+    /* 配色 */
+    --card-bg: rgba(20, 20, 42, 0.85);
+    --card-border: #2a2a4a;
+    --text-name: #00d4d4;
+    --text-dur: #888;
+    --text-tok: #00d4d4;
+    --text-tps: #ffaa33;
+    --text-idle: #555;
+    /* 状态色: agent state 映射颜色, 供 .s-* 复用 */
+    --st-stream: #00ff88;
+    --st-think:  #aa88ff;
+    --st-work:   #ffaa00;
+    --st-wait:   #00aaff;
+    --st-stuck:  #ff4444;
+    --st-idle:   #666;
+    /* 尺寸 */
+    --font-size: 11px;
+    --radius: 12px;   /* 圆角加大, 四角更圆润 */
+    /* 内边距: 上下用 --pad-y, 左右用 --pad-x, 各自独立 */
+    --pad-y: 4px;
+    --pad-x: 9px;
+    --gap: 6px;
+    --indent: 12px;
+    /* 阴影: 去掉 box-shadow. --shadow-pad 仅作窗口余量, 防透明窗口边缘裁剪 */
+    --shadow: none;
+    --shadow-pad-y: 4px;
+    --shadow-pad-x: 9px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: transparent; }
+  body {
+    font-family: 'Cascadia Code', 'Consolas', 'Courier New', monospace;
+    font-size: var(--font-size);
+    -webkit-user-select: none;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  .card {
+    display: inline-block;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius);
+    padding: var(--pad-y) var(--pad-x);
+    box-shadow: var(--shadow);
+    cursor: pointer;
+  }
+  .row {
+    display: flex; justify-content: space-between; align-items: center;
+    gap: var(--gap); padding: 1px 0; white-space: nowrap;
+  }
+  .row.indent { padding-left: var(--indent); }
+  .row.dim { opacity: 0.4; }   /* idle 会话淡化, 突出活跃 (stream/work/wait) 行 */
+  .name { color: var(--text-name); }
+  .state { font-weight: bold; }
+  .s-stream { color: var(--st-stream); }
+  .s-think  { color: var(--st-think); }
+  .s-work   { color: var(--st-work); }
+  .s-wait   { color: var(--st-wait); }
+  .s-stuck  { color: var(--st-stuck); }
+  .s-idle   { color: var(--st-idle); }
+  .dur { color: var(--text-dur); }
+  .tps { color: var(--text-tps); }
+  .tok { color: var(--text-tok); }
+  .idle { color: var(--text-idle); text-align: center; padding: 3px 0; }
+</style>
+</head>
+<body>
+  <div class="card" id="card"><div class="row"><span class="name s-idle">—</span><span class="state s-idle">idle</span><span class="dur">—</span></div></div>
+<script>
+function esc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function stateShort(st, phase) {
+  if (st === 'STREAM') return phase === 'think' ? 'think' : 'stream';
+  if (st === 'WORK') return 'work';
+  if (st === 'WAITING') return 'wait';
+  if (st === 'SSE_STUCK') return 'stuck';
+  return 'idle';
+}
+// ms to Xs / XmYs / XhYm
+function fmtMs(ms) {
+  if (!ms || ms < 0) return '';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return s + 's';
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + 'm' + (s % 60) + 's';
+  return Math.floor(m / 60) + 'h' + (m % 60) + 'm';
+}
+
+// token 数压缩: 1234 → 1.2k, 1500000 → 1.5M. 跟 dashboard formatTokens 行为一致.
+function fmtTok(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+  return String(n);
+}
+
+// 渲染单行. indent=true 时 subagent 缩进, 从属上一行主 agent.
+// STREAM 态展示本流累计 tokens (与 dashboard stateHtml 的 streamTokens 行为一致).
+function row([id, a], name, indent) {
+  const phase = a.streamPhase || null;
+  const st = stateShort(a.state, phase);
+  const dur = fmtMs(a.stateMs);
+  // IDLE 隐藏: 上一流的 lastRealTps 会让 IDLE 残留速率 → 状态对比无意义, 隐藏.
+  const tps = (a.tps > 0 && a.state !== 'IDLE') ? '<span class="tps">↓' + a.tps + '</span>' : '';
+  const tok = (a.state === 'STREAM' && a.streamTokens > 0) ? '<span class="tok">' + fmtTok(a.streamTokens) + '</span>' : '';
+  const dim = st === 'idle' ? ' dim' : '';   // idle 淡化, 突出活跃行
+  return '<div class="row' + (indent ? ' indent' : '') + dim + '"><span class="name" title="' + esc(id) + '">' + name + '</span>' +
+    '<span class="state s-' + st + '">' + st + '</span>' +
+    (dur ? '<span class="dur">' + dur + '</span>' : '') + tps + tok + '</div>';
+}
+
+const card = document.getElementById('card');
+
+// resize: window = card + 余量(--shadow-pad, 每边). 防透明窗口边缘裁剪. 从 CSS 读, 单一数据源.
+let lastW = 0, lastH = 0;
+const SHADOW_PAD_X = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--shadow-pad-x')) || 9;
+const SHADOW_PAD_Y = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--shadow-pad-y')) || 4;
+const ro = new ResizeObserver(() => {
+  const w = card.offsetWidth + SHADOW_PAD_X * 2;
+  const h = card.offsetHeight + SHADOW_PAD_Y * 2;
+  if (w === lastW && h === lastH) return;
+  lastW = w; lastH = h;
+  if (window.ccMonitor && window.ccMonitor.resizeFloat) window.ccMonitor.resizeFloat(w, h);
+});
+ro.observe(card);
+
+// 自定义拖动 (弃 -webkit-app-region:drag, 它吞 click). mousedown+move超阈值=拖动; mouseup没拖=click回dashboard
+let down = null;
+card.addEventListener('mousedown', (e) => {
+  down = { x: e.screenX, y: e.screenY, moved: false };
+  if (window.ccMonitor && window.ccMonitor.floatDragStart) window.ccMonitor.floatDragStart(e.screenX, e.screenY);
+});
+document.addEventListener('mousemove', (e) => {
+  if (!down) return;
+  if (!down.moved && (Math.abs(e.screenX - down.x) > 4 || Math.abs(e.screenY - down.y) > 4)) down.moved = true;
+  if (down.moved && window.ccMonitor && window.ccMonitor.floatDragMove) window.ccMonitor.floatDragMove(e.screenX, e.screenY);
+});
+document.addEventListener('mouseup', () => {
+  if (down && !down.moved) {
+    if (window.ccMonitor && window.ccMonitor.backToDashboard) window.ccMonitor.backToDashboard();
+  }
+  down = null;
+});
+
+async function poll() {
+  try {
+    const r = await fetch('/status', { cache: 'no-store' });
+    const d = await r.json();
+    const all = Object.entries(d.agents || {});
+    if (!all.length) {
+      // 空状态: 三列 row (与 1 个 agent idle 行同结构), card 尺寸一致无白边差异
+      card.innerHTML = '<div class="row"><span class="name s-idle">—</span><span class="state s-idle">idle</span><span class="dur">—</span></div>';
+      return;
+    }
+    // 按 session 分组: 主 agent 顶格, 同 session 的 subagent 缩进排在下面.
+    const groups = new Map();
+    let g = 0;
+    for (const [id, a] of all) {
+      const key = a.sessionId ? ('s:' + a.sessionId) : ('o:' + g++);
+      if (!groups.has(key)) groups.set(key, { main: null, subs: [] });
+      const grp = groups.get(key);
+      if (a.isSubagent) grp.subs.push([id, a]);
+      else grp.main = [id, a];
+    }
+    let mainN = 0, subN = 0;
+    const rows = [];
+    for (const grp of groups.values()) {
+      if (grp.main) {
+        rows.push(row(grp.main, 'c' + (++mainN), false));
+        for (const sub of grp.subs) rows.push(row(sub, 's' + (++subN), true));
+      } else {
+        // 所属 main 已清理, sub 顶到顶层不缩进
+        for (const sub of grp.subs) rows.push(row(sub, 's' + (++subN), false));
+      }
+    }
+    card.innerHTML = rows.join('');
+  } catch (e) {}
+}
+setInterval(poll, 200);
+poll();
+
+// Dev 热加载: mini.html 改动自动 reload
+(async () => {
+  try {
+    const probe = await fetch('/__dev_mini_mtime__');
+    if (!probe.ok) return;
+    let last = (await probe.json()).mtime;
+    setInterval(async () => {
+      try {
+        const m = (await (await fetch('/__dev_mini_mtime__', { cache: 'no-store' })).json()).mtime;
+        if (m !== last) location.reload();
+      } catch (e) {}
+    }, 1000);
+  } catch (e) {}
+})();
+</script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { open, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
 export interface SessionRef {
@@ -18,12 +18,15 @@ export interface SessionRef {
 /**
  * 扫描 ~/.claude/projects/<project>/<sessionId>.jsonl，返回所有顶层会话（按 mtime 倒序）。
  * 同名目录（子产物/subagents）与非 .jsonl 文件自动跳过。
+ *
+ * 全异步（fs/promises）且逐文件让出事件循环：在 Electron 主进程跑时不会阻塞
+ * 窗口事件/IPC/内嵌 proxy —— 几百个会话（数百 MB）的全量扫描曾把主进程冻住数秒。
  */
-export function scanProjects(root: string): SessionRef[] {
+export async function scanProjects(root: string): Promise<SessionRef[]> {
   const out: SessionRef[] = []
   let projects: string[]
   try {
-    projects = readdirSync(root, { withFileTypes: true })
+    projects = (await readdir(root, { withFileTypes: true }))
       .filter((d) => d.isDirectory())
       .map((d) => d.name)
   } catch {
@@ -33,7 +36,7 @@ export function scanProjects(root: string): SessionRef[] {
     const pdir = join(root, proj)
     let entries: string[]
     try {
-      entries = readdirSync(pdir)
+      entries = await readdir(pdir)
     } catch {
       continue
     }
@@ -41,9 +44,9 @@ export function scanProjects(root: string): SessionRef[] {
       if (!f.endsWith('.jsonl')) continue
       const full = join(pdir, f)
       try {
-        const st = statSync(full)
+        const st = await stat(full)
         if (!st.isFile()) continue
-        const { cwd, aiTitle, userPrompt } = readSessionMeta(full)
+        const { cwd, aiTitle, userPrompt } = await readSessionMeta(full)
         out.push({
           project: proj,
           sessionId: f.replace(/\.jsonl$/, ''),
@@ -57,6 +60,8 @@ export function scanProjects(root: string): SessionRef[] {
       } catch {
         // 单文件读 stat 失败，跳过
       }
+      // 每个文件让出事件循环，主进程保持响应
+      await new Promise<void>((resolve) => setImmediate(resolve))
     }
   }
   return out.sort((a, b) => b.mtimeMs - a.mtimeMs)
@@ -69,49 +74,61 @@ export function defaultProjectsRoot(): string {
 }
 
 const META_MAX_LINES = 200
+/** 只读文件头提取元数据：cwd/ai-title/首条 user prompt 通常都在前部，整读大文件（百 MB 级）会拖垮扫描。 */
+const META_READ_BYTES = 256 * 1024
 
 /**
- * 读取 .jsonl 前若干行，提取 cwd（真实路径）、aiTitle（最新会话总结名称）与
+ * 读取 .jsonl 文件头（前 META_READ_BYTES 字节），提取 cwd（真实路径）、aiTitle（最新会话总结名称）与
  * 第一条 user prompt（剔除 command-message 包裹的命令）。
- * 只读前 META_MAX_LINES 行（ai-title 通常出现在文件前部），全部找到即提前停止。
+ * 只看前 META_MAX_LINES 行（ai-title 通常出现在文件前部），全部找到即提前停止。
  * 容错：文件读失败 / 行解析失败 → 返回空对象，绝不抛出。
+ * 代价：超长首条 user 消息（>256KB）会被截断丢失 —— 仅影响列表展示标题，可接受。
  */
-export function readSessionMeta(file: string): { cwd?: string | null; aiTitle?: string | null; userPrompt?: string | null } {
+export async function readSessionMeta(file: string): Promise<{ cwd?: string | null; aiTitle?: string | null; userPrompt?: string | null }> {
+  let text: string
+  try {
+    const fh = await open(file, 'r')
+    try {
+      const buf = Buffer.alloc(META_READ_BYTES)
+      const { bytesRead } = await fh.read(buf, 0, META_READ_BYTES, 0)
+      text = buf.subarray(0, bytesRead).toString('utf8')
+    } finally {
+      await fh.close()
+    }
+  } catch {
+    // 文件读失败（权限、被删等）→ 返回空
+    return {}
+  }
   let cwd: string | null = null
   let aiTitle: string | null = null
   let userPrompt: string | null = null
   let foundCwd = false
   let foundTitle = false
   let foundPrompt = false
-  try {
-    const content = readFileSync(file, 'utf8')
-    for (const line of content.split('\n').slice(0, META_MAX_LINES)) {
-      if (foundCwd && foundTitle && foundPrompt) break
-      if (!line.trim()) continue
-      let obj: Record<string, unknown>
-      try {
-        obj = JSON.parse(line)
-      } catch {
-        continue // 单行容错：坏 JSON 跳过
-      }
-      if (!foundCwd && typeof obj['cwd'] === 'string') {
-        cwd = obj['cwd']
-        foundCwd = true
-      }
-      if (!foundTitle && obj['type'] === 'ai-title' && typeof obj['aiTitle'] === 'string') {
-        aiTitle = obj['aiTitle']
-        foundTitle = true
-      }
-      if (!foundPrompt && obj['type'] === 'user') {
-        const p = extractUserPrompt(obj)
-        if (p) {
-          userPrompt = p
-          foundPrompt = true
-        }
+  for (const line of text.split('\n').slice(0, META_MAX_LINES)) {
+    if (foundCwd && foundTitle && foundPrompt) break
+    if (!line.trim()) continue
+    let obj: Record<string, unknown>
+    try {
+      obj = JSON.parse(line)
+    } catch {
+      continue // 单行容错：坏 JSON（含截断的末行）跳过
+    }
+    if (!foundCwd && typeof obj['cwd'] === 'string') {
+      cwd = obj['cwd']
+      foundCwd = true
+    }
+    if (!foundTitle && obj['type'] === 'ai-title' && typeof obj['aiTitle'] === 'string') {
+      aiTitle = obj['aiTitle']
+      foundTitle = true
+    }
+    if (!foundPrompt && obj['type'] === 'user') {
+      const p = extractUserPrompt(obj)
+      if (p) {
+        userPrompt = p
+        foundPrompt = true
       }
     }
-  } catch {
-    // 文件读失败（权限、被删等）→ 返回空，不抛出
   }
   return {
     cwd: foundCwd ? cwd : undefined,
