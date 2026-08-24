@@ -22,6 +22,7 @@ const EMPTY_REPORT: ReportState = { text: '', error: '', claudeId: undefined, lo
 export function AnalyzerPage({ onCopy }: { onCopy: (text: string, tip: string) => void }): JSX.Element {
   const [sessions, setSessions] = useState<SessionRef[]>([])
   const [sessionsLoading, setSessionsLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [session, setSession] = useState<Session | null>(null)
   const [selected, setSelected] = useState<TreeNode | null>(null)
   const [selectedPath, setSelectedPath] = useState<string | undefined>()
@@ -35,12 +36,22 @@ export function AnalyzerPage({ onCopy }: { onCopy: (text: string, tip: string) =
   // 生成报告时的窗口（用于「窗口已变化」提示）
   const [reportWindow, setReportWindow] = useState<{ start: number; end: number } | null>(null)
 
-  useEffect(() => {
-    void window.api.scanProjects().then((s) => {
-      setSessions(s)
-      setSessionsLoading(false)
-    })
+  const loadSessions = useCallback(async (): Promise<void> => {
+    const s = await window.api.scanProjects()
+    setSessions(s)
+    setSessionsLoading(false)
   }, [])
+
+  useEffect(() => {
+    void loadSessions()
+  }, [loadSessions])
+
+  /** 手动刷新会话列表：cc-monitor 挂后台期间新会话/标题持续产生，无需重启应用 */
+  const refresh = (): void => {
+    if (refreshing) return
+    setRefreshing(true)
+    void loadSessions().finally(() => setRefreshing(false))
+  }
 
   // 文件菜单「导入会话」：主进程打开对话框后把路径推过来
   useEffect(() => window.api.onImportSession((path) => load(path)), [])
@@ -153,7 +164,33 @@ export function AnalyzerPage({ onCopy }: { onCopy: (text: string, tip: string) =
 
       <div style={shellStyle}>
         <aside style={{ ...sidebarStyle, width: sidebarW }}>
-          <div style={sidebarHeaderStyle}>会话</div>
+          <div style={sidebarHeaderStyle}>
+            <span>会话</span>
+            <button
+              type="button"
+              onClick={refresh}
+              disabled={refreshing}
+              title={refreshing ? '扫描中…' : '刷新会话列表'}
+              aria-label="刷新会话列表"
+              style={{ ...refreshBtnStyle, ...(refreshing ? { opacity: 0.6, cursor: 'wait' } : {}) }}
+            >
+              <svg
+                className={refreshing ? 'spin' : undefined}
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                <path d="M21 3v6h-6" />
+              </svg>
+            </button>
+          </div>
           <div style={{ flex: 1, minHeight: 0 }}>
             {sessionsLoading ? (
               <div style={loadingStyle}>扫描 ~/.claude/projects 中…</div>
@@ -331,6 +368,9 @@ const sidebarSplitterStyle: React.CSSProperties = {
 }
 
 const sidebarHeaderStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
   padding: '8px 12px',
   fontWeight: 700,
   fontSize: 'var(--fs-sm)',
@@ -338,6 +378,22 @@ const sidebarHeaderStyle: React.CSSProperties = {
   textTransform: 'uppercase',
   letterSpacing: '0.04em',
   borderBottom: '1px solid var(--border)',
+}
+
+const refreshBtnStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 22,
+  height: 22,
+  padding: 0,
+  border: '1px solid var(--border)',
+  background: 'var(--bg-elevated)',
+  color: 'var(--text-secondary)',
+  borderRadius: 'var(--r-sm)',
+  cursor: 'pointer',
+  flexShrink: 0,
+  transition: 'background var(--transition-fast), color var(--transition-fast)',
 }
 
 const loadingStyle: React.CSSProperties = {
