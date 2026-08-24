@@ -120,3 +120,37 @@ describe('parseLines — tolerance', () => {
     expect(tc.result!.length).toBe(5 * 1024)
   })
 })
+
+describe('parseLines — new-format meta noise', () => {
+  const userLine = (content: string, isMeta?: boolean) =>
+    `{"type":"user","message":{"role":"user","content":${JSON.stringify(content)}},"timestamp":"2026-08-20T07:00:00.000Z",${isMeta ? `"isMeta":${isMeta},` : ''}"sessionId":"m"}`
+
+  it('does not create turns from isMeta system-injected user events', () => {
+    const s = parseLines(
+      [
+        userLine('你好'),
+        '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hi"}]},"timestamp":"2026-08-20T07:00:10.000Z"}',
+        userLine('[Image: source: C:\\Temp\\paste.png]', true),
+        userLine('真实提问'),
+      ],
+      'm',
+    )
+    // isMeta 图片通知不产生轮次：真实提问应成为第二轮
+    expect(s.turns).toHaveLength(2)
+    expect(s.turns[1].userMsg?.text).toBe('真实提问')
+  })
+
+  it('does not create turns from task-notification user events', () => {
+    const s = parseLines(
+      [
+        '{"type":"user","message":{"role":"user","content":"发起任务"},"timestamp":"2026-08-20T07:00:00.000Z"}',
+        '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]},"timestamp":"2026-08-20T07:00:10.000Z"}',
+        '{"type":"user","message":{"role":"user","content":"<task-notification>\\n<task-id>a36235b4710c2a21b</task-id>\\n<output-file>C:\\\\tmp\\\\o.json</output-file>\\n</task-notification>"},"timestamp":"2026-08-20T07:00:20.000Z"}',
+        '{"type":"user","message":{"role":"user","content":"下一个问题"},"timestamp":"2026-08-20T07:01:00.000Z"}',
+      ],
+      'm',
+    )
+    expect(s.turns).toHaveLength(2)
+    expect(s.turns[1].userMsg?.text).toBe('下一个问题')
+  })
+})

@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import type { SessionRef } from '../../core/discovery/scan'
 import { decodeProjectDir } from '../../core/discovery/projectDir'
-import { fmtRelative, fmtSize, timeBucketLabel } from '../../core/view/format'
+import { fmtRelative, fmtSize, sessionDisplayTitle, timeBucketLabel } from '../../core/view/format'
 
 type ListView = 'project' | 'timeline'
 const VIEW_STORAGE_KEY = 'ccsa-session-view'
@@ -260,7 +260,7 @@ function Row(props: {
         title={`右键复制会话 ID：${props.s.sessionId}`}
         style={{ fontWeight: 600, fontSize: 'var(--fs-base)', fontFamily: 'var(--font-mono)', cursor: 'copy' }}
       >
-        {sessionTitle(props.s)}
+        {sessionDisplayTitle(props.s)}
       </div>
       <div style={{ display: 'flex', gap: 8, marginTop: 1, color: 'var(--text-faint)', fontSize: 'var(--fs-xs)' }}>
         <span>{fmtRelative(props.s.mtimeMs)}</span>
@@ -338,12 +338,6 @@ const copiedTipStyle: React.CSSProperties = {
   animation: 'fadeInOut 1s ease',
 }
 
-/** 会话标题三级降级：aiTitle → 首条 user prompt（截断 40 字）→ sessionId 前 12 位 */
-function sessionTitle(s: SessionRef): string {
-  if (s.aiTitle) return s.aiTitle
-  if (s.userPrompt) return s.userPrompt.length > 40 ? `${s.userPrompt.slice(0, 40)}…` : s.userPrompt
-  return `${s.sessionId.slice(0, 12)}…`
-}
 
 /** 分组标题：优先显示 cwd 的末尾目录名（如「请假审批」），否则回退到解码目录名的末尾 */
 function groupTitle(proj: string, sess: SessionRef[]): string {

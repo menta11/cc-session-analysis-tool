@@ -71,3 +71,16 @@ export function timeBucketLabel(tsMs: number, nowMs: number = Date.now()): strin
   if (ts.getFullYear() === now.getFullYear() && ts.getMonth() === now.getMonth()) return '本月'
   return '更早'
 }
+
+/** 会话显示标题四级降级：customTitle（用户显式命名）→ aiTitle（AI 摘要）→ 首条 user prompt（截断 40 字）→ sessionId 前 12 位 */
+export function sessionDisplayTitle(s: {
+  sessionId: string
+  customTitle?: string | null
+  aiTitle?: string | null
+  userPrompt?: string | null
+}): string {
+  if (s.customTitle) return s.customTitle
+  if (s.aiTitle) return s.aiTitle
+  if (s.userPrompt) return s.userPrompt.length > 40 ? `${s.userPrompt.slice(0, 40)}…` : s.userPrompt
+  return `${s.sessionId.slice(0, 12)}…`
+}

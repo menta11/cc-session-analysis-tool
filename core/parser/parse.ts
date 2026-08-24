@@ -90,7 +90,20 @@ export function parseLines(lines: Iterable<string>, sessionIdFallback = 'unknown
       skipped[key] = (skipped[key] ?? 0) + 1
       continue
     }
-    if (t === 'user' || t === 'assistant') {
+    if (t === 'user') {
+      // 系统注入的 user 事件（isMeta: 图片粘贴/技能上下文/命名提醒；内容为 task-notification 的后台
+      // 任务完成通知）不是真实提问：不建轮，避免污染轮次/间隙/AI 分析素材。
+      if (obj['isMeta'] === true) {
+        skipped['user-meta'] = (skipped['user-meta'] ?? 0) + 1
+        continue
+      }
+      const content = (obj['message'] as Obj | undefined)?.['content']
+      if (typeof content === 'string' && content.startsWith('<task-notification>')) {
+        skipped['user-task-notification'] = (skipped['user-task-notification'] ?? 0) + 1
+        continue
+      }
+      events.push(obj)
+    } else if (t === 'assistant') {
       events.push(obj)
     } else {
       const key = (t as string) ?? 'unknown'

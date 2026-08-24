@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Session } from '../../core/parser/types'
 import type { SessionRef } from '../../core/discovery/scan'
 import type { TreeNode } from '../../core/view/treeView'
-import { fmtMs, fmtRelative } from '../../core/view/format'
+import { fmtMs, fmtRelative, sessionDisplayTitle } from '../../core/view/format'
 import { decodeProjectDir } from '../../core/discovery/projectDir'
 import { SessionList } from '../components/SessionList'
 import { TimeTree } from '../components/TimeTree'
@@ -139,7 +139,7 @@ export function AnalyzerPage({ onCopy }: { onCopy: (text: string, tip: string) =
             }}
           >
             <span style={{ ...dotStyle, background: 'var(--cat-compute)' }} />
-            <b>{curRef?.aiTitle ?? session.sessionId.slice(0, 8)}</b>
+            <b>{sessionDisplayTitle(curRef ?? { sessionId: session.sessionId })}</b>
           </span>
           <span className="chip" style={chipStyle}>总耗时 <b>{fmtMs(wallMs)}</b></span>
           {projectLabel ? (

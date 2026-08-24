@@ -1,0 +1,8 @@
+{"type":"last-prompt","leafUuid":"00000000-0000-4000-8000-000000000011","sessionId":"sess-4"}
+{"type":"mode","mode":"normal","sessionId":"sess-4"}
+{"type":"permission-mode","permissionMode":"default","sessionId":"sess-4"}
+{"type":"user","uuid":"u1","parentUuid":null,"isSidechain":false,"timestamp":"2026-08-20T06:57:35.608Z","message":{"role":"user","content":"你好"},"cwd":"d:\\workspace\\saaserp","sessionId":"sess-4","version":"2.1.231","gitBranch":"main"}
+{"type":"assistant","uuid":"a1","parentUuid":"u1","isSidechain":false,"timestamp":"2026-08-20T06:57:40.000Z","message":{"role":"assistant","content":[{"type":"text","text":"你好！有什么可以帮你？"}]},"sessionId":"sess-4","version":"2.1.231","gitBranch":"main"}
+{"type":"custom-title","customTitle":"JLC-TEST-0001","sessionId":"sess-4"}
+{"type":"agent-name","agentName":"JLC-TEST-0001","sessionId":"sess-4"}
+{"type":"user","uuid":"u2","parentUuid":null,"isSidechain":false,"isMeta":true,"timestamp":"2026-08-20T06:57:48.779Z","message":{"role":"user","content":"<system-reminder>\nThe user named this session \"JLC-TEST-0001\". This may indicate the session's focus or intent.\n</system-reminder>"},"cwd":"d:\\workspace\\saaserp","sessionId":"sess-4","version":"2.1.231","gitBranch":"main"}
