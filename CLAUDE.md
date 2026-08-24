@@ -180,13 +180,17 @@ isolation. Electron and React are thin adapters over `core/`.
   `sample-session/` with a `subagents/agent-*.jsonl` sidecar for linking).
 - **`test/real-sample*.smoke.test.ts` are gitignored** — they hard-code a machine-local
   session path under `~/.claude/projects/<sanitized-cwd>/<id>.jsonl` plus sample-specific
-  counts/durations that won't match anyone else's transcript. A path-less, numbers-agnostic
-  `test/real-sample.smoke.template.ts` is checked in instead: copy it to
-  `real-sample.smoke.test.ts`, fill in `BASE`/`MAIN`/`PROJECTS_ROOT` with your own session,
-  tune the `expect(...)` values to your sample, and run. The copy is auto-ignored so you can
-  write local values freely. The template itself (`.template.ts`) is neither collected by
-  vitest (`include: test/**/*.test.ts`) nor typechecked (neither node/web tsconfig includes
-  `test/`), so it stays inert until renamed.
+  counts/durations that won't match anyone else's transcript. Path-less, numbers-agnostic
+  `*.smoke.template.ts` files are checked in instead: copy one to its `.smoke.test.ts` name
+  (replace `.template` with `test`), fill in `BASE`/`MAIN`/`PROJECTS_ROOT` with your own
+  session, tune the `expect(...)` values to your sample, and run. Four exist:
+  `real-sample.smoke.template.ts` (all-in-one: parse + breakdown + subagents + digest),
+  plus focused `real-sample-{breakdown,subagents,digest}.smoke.template.ts` variants with
+  deeper per-area assertions (digest truncation, diagnostic facts, parent/child
+  reconciliation). The copy is auto-ignored so you can write local values freely. The
+  templates themselves (`.template.ts`) are neither collected by vitest
+  (`include: test/**/*.test.ts`) nor typechecked (neither node/web tsconfig includes
+  `test/`), so they stay inert until renamed.
 
 ## Non-source directories
 
