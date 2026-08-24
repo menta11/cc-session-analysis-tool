@@ -32,6 +32,9 @@ desktop.ini
 .env.local
 .claude/
 
+# 使用指南/ 使用文档不入库
+使用指南/
+
 # docs/调研/ 参考仓库：忽略压缩包与解压临时克隆，保留 .md 调研报告
 docs/调研/*.zip
 docs/调研/*-temp/
