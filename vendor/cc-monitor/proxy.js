@@ -12,7 +12,12 @@ const { loadConfig } = require('./shared/config');
 // 实时 output TPS 估算用 tokenizer. gpt-tokenizer 默认 o200k_base (GPT-4o 系 BPE),
 // 是公开词表里最接近 Claude 4 的. Claude 3/4 真实 tokenizer 未公开 → 这是估计值;
 // 流末仍用真实 output_tokens 收口 (lastRealTps). 纯 JS → Win/Mac 通用, Electron 友好.
-const { encode } = require('gpt-tokenizer');
+//
+// 注意: 这里刻意走**子路径**而不是 barrel `require('gpt-tokenizer')`.
+// 包内附带 cl100k/p50k/r50k/o200k_harmony 等全部词表 + esm/ + dist/ + source map, 共 55MB,
+// 而这条链只需要 o200k_base 一个词表. electron-builder.yml 的 files 里有一份与之配对的
+// 排除清单 (裁到 ~4MB). **改这里的 require 之前, 先同步复核那份清单.**
+const { encode } = require('gpt-tokenizer/cjs/encoding/o200k_base');
 const countTokens = (text) => encode(text || '').length;
 
 // 本文件作为外部模块由主进程运行时 require (不进 bundle), 由 viteStaticCopy 拷到
@@ -22,6 +27,28 @@ const MONITOR_DIR = __dirname;
 const DEV = !!process.defaultApp;
 const config = loadConfig(MONITOR_DIR);
 const PORT = config.port;
+
+// --- 请求日志: 落盘 <LOG_DIR>/proxy.log, 同时进终端 ---
+// 目录由宿主注入 (monitorHost: dev→项目根, 打包→userData) —— 打包后 cwd 是 /, 根目录只读,
+// 而 __dirname 在 asar 内同样只读. 不走这两处, 也不自己判断打包状态.
+// 独立跑 (node proxy.js) 无宿主 → 回落 cwd/logs.
+const LOG_DIR = process.env.CC_MONITOR_LOG_DIR || path.join(process.cwd(), 'logs');
+const LOG_FILE = path.join(LOG_DIR, 'proxy.log');
+let logWriteWarned = false;
+function logLine(msg) {
+  const line = `[${new Date().toISOString()}] ${msg}`;
+  console.log(line);
+  try {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+    fs.appendFileSync(LOG_FILE, line + '\n');
+  } catch (e) {
+    // 写盘失败不打断请求转发, 但提示一次 —— 全静默会让人以为日志功能没生效
+    if (!logWriteWarned) {
+      logWriteWarned = true;
+      console.error(`[log] 落盘失败, 仅终端输出: ${LOG_FILE} — ${e.message}`);
+    }
+  }
+}
 
 // --- Debug dump (临时诊断: 捕获"WAITING 长 + STREAM 几乎无"异常路径) ---
 // 触发条件: SSE 已开 + lastDeltaTs===0 持续 > DUMP_NO_DELTA_MS, 或
@@ -229,32 +256,47 @@ function applyStateOverrides() {
   }
 }
 
-// Resolve real API endpoint (NOT from ANTHROPIC_BASE_URL — that points to us).
-// Priority:
-//   1. monitor-state.json previousBaseUrl (上次开监控前的原 URL, 监控重启时记得真实中转站)
-//   2. ~/.claude/settings.json env.ANTHROPIC_BASE_URL (跳过 localhost — 此时指向本代理自己)
-//   3. Anthropic 官方
+// 单一来源的真实上游解析. 返回 null = 所有来源都没给出可用端点, 调用方决定怎么处理.
+// 必须镜像 cc 自己的取值优先级, 否则代理会把流量转到一个 cc 根本不会用的端点.
+// settings.json 与 ANTHROPIC_BASE_URL 的先后是实测得出的 (两边各设一可用一不可用 URL,
+// 两个方向结论一致): ~/.claude/settings.json 的 env 块 **压过** 继承来的环境变量.
+// Priority (高 → 低):
+//   1. CC_MONITOR_TARGET 环境变量 (本 app 的显式逃生口)
+//   2. ~/.claude/settings.json env.ANTHROPIC_BASE_URL (实测优先于环境变量)
+//   3. monitor-state.json previousBaseUrl (上次开监控前的原 URL; 监控开着时 settings 指向
+//      本代理会被下面的 isProxySelf 跳过, 靠它回填真实上游)
+//   4. ANTHROPIC_BASE_URL 环境变量 (settings.json 没配时的来源)
+// 全部跳过指向本代理自己的地址 (loopback + 同 PORT), 否则转发给自己 = 死循环.
+function resolveExplicitApiUrl() {
+  // 用 thunk 延迟求值: 命中高优先级来源即返回, 不再读后面的 settings.json / state.json.
+  // getSettingsBaseUrl() 与 loadMonitorState() 都做磁盘读, 热路径外也值得一提 (见 getBaseUrlStatus 的多次调用).
+  const sources = [
+    () => process.env.CC_MONITOR_TARGET,
+    () => getSettingsBaseUrl(),
+    () => loadMonitorState().previousBaseUrl,
+    () => process.env.ANTHROPIC_BASE_URL,
+  ];
+  for (const read of sources) {
+    const c = read();
+    if (!c) continue;
+    try {
+      if (!isProxySelf(new URL(c))) return c;
+    } catch (e) { /* invalid url, try next */ }
+  }
+  return null;
+}
+
 function resolveApiUrl() {
-  const state = loadMonitorState();
-  if (state.previousBaseUrl) {
-    try {
-      const u = new URL(state.previousBaseUrl);
-      if (!isProxySelf(u)) return state.previousBaseUrl;
-    } catch (e) {}
-  }
-  const fromSettings = getSettingsBaseUrl();
-  if (fromSettings) {
-    try {
-      const u = new URL(fromSettings);
-      if (!isProxySelf(u)) return fromSettings;
-    } catch (e) { /* invalid url, fall through */ }
-  }
-  return 'https://api.anthropic.com';
+  return resolveExplicitApiUrl() || 'https://api.anthropic.com';
 }
 
 const BASE_URL = resolveApiUrl();
 const parsed = new URL(BASE_URL);
 const API_HOST = parsed.hostname;
+
+// 没有解析出显式上游 (从未存过 previousBaseUrl, env 与 settings.json 也都没有).
+// 此时 BASE_URL 只是占位常量, 绝不代表用户真在直连官方.
+const NO_UPSTREAM = resolveExplicitApiUrl() === null;
 
 // Proxy loop detection (测试模式: CC_MONITOR_LOOP_BYPASS=1 允许 localhost)
 if (process.env.CC_MONITOR_LOOP_BYPASS !== '1' &&
@@ -264,21 +306,57 @@ if (process.env.CC_MONITOR_LOOP_BYPASS !== '1' &&
   process.exit(1);
 }
 
-// No upstream resolved: when monitoring was never opened (or state was wiped),
-// we have no record of the user's real API endpoint, so we MUST NOT silently
-// fall back to the official api.anthropic.com — that breaks anyone using a
-// Fail loud instead. User fixes via: enable monitoring once in dashboard
-// (records previousBaseUrl).
-if (BASE_URL === 'https://api.anthropic.com'
-    && !loadMonitorState().previousBaseUrl) {
-  const fromSettings = getSettingsBaseUrl();
-  if (!fromSettings || /localhost|127\.0\.0\.1/.test(fromSettings)) {
-    console.error(`[proxy] FATAL: no upstream API URL resolved.`);
-    console.error(`[proxy] state.previousBaseUrl: ${loadMonitorState().previousBaseUrl || '(unset)'}`);
-    console.error(`[proxy] settings.json baseurl: ${fromSettings || '(unset)'}`);
-    console.error(`[proxy] Fix: open monitoring once in the dashboard (records your real URL).`);
-    process.exit(1);
-  }
+// 逐源诊断: 列出每个候选的「原始值 + 未采纳原因」.
+// 不能一律打印 "(unset)" —— "根本没设" / "设了但 URL 非法" / "设了但指向本代理自己"
+// 是三种不同的修法, 混在一起用户不知道该改哪个.
+// 结构化逐源报告: { name, raw, why }. raw 为空 = 未设置; why 非空 = 未采纳原因.
+// 启动告警与运行期 availableReason 共用同一份归类 —— 两处各写一套文案就会像早期那样
+// 把「根本没设」「URL 非法」「指向自己」三种成因混为一谈, 用户照着错提示改不好.
+function upstreamSourceReport() {
+  const rows = [
+    ['CC_MONITOR_TARGET', process.env.CC_MONITOR_TARGET],
+    [`settings.json (${SETTINGS_PATH.replace(os.homedir(), '~')})`, getSettingsBaseUrl()],
+    ['monitor-state 缓存', loadMonitorState().previousBaseUrl],
+    ['ANTHROPIC_BASE_URL 环境变量', process.env.ANTHROPIC_BASE_URL],
+  ];
+  return rows.map(([name, raw]) => {
+    if (!raw) return { name, raw: '', why: '' };
+    try {
+      return isProxySelf(new URL(raw))
+        ? { name, raw, why: '指向本代理自己 (转发给自己 = 死循环), 已跳过' }
+        : { name, raw, why: '' };
+    } catch (e) {
+      return { name, raw, why: 'URL 格式非法, 无法解析' };
+    }
+  });
+}
+
+function diagnoseUpstreamSources() {
+  return upstreamSourceReport().map(
+    (r) => `${r.name} : ${r.raw || '未设置'}${r.raw && r.why ? `   ← ${r.why}` : ''}`,
+  );
+}
+
+// 无上游: 本文件由 Electron 主进程 (monitorHost.ts) 在进程内 require, 模块顶层硬退
+// 会连整个 app 一起杀掉 —— 会话分析页也起不来. 这里降级为: 起 server 但禁用监控,
+// 用户仍能打开 dashboard 配置. 见 monitorUnavailableReason() / enableMonitoring().
+if (NO_UPSTREAM) {
+  const bar = '─'.repeat(64);
+  console.warn(`[proxy] ${bar}`);
+  console.warn('[proxy] 未能确定上游 API 地址，实时监控已停用。');
+  console.warn('[proxy] （会话分析功能不受影响，可正常使用。）');
+  console.warn(`[proxy] ${bar}`);
+  console.warn('[proxy] 已按优先级检查以下来源，均不可用：');
+  for (const row of diagnoseUpstreamSources()) console.warn(`[proxy]   • ${row}`);
+  console.warn('[proxy]');
+  console.warn('[proxy] 影响：dashboard 里的监控开关会置灰，不会改写你的 ANTHROPIC_BASE_URL。');
+  console.warn('[proxy] 修复：任选一种，然后重启本应用 ——');
+  console.warn('[proxy]   1. 在 settings.json 的 env 中加入你的中转站地址，例如：');
+  console.warn('[proxy]        "env": { "ANTHROPIC_BASE_URL": "https://your-relay.example.com/api" }');
+  console.warn('[proxy]   2. 启动本应用前先 export ANTHROPIC_BASE_URL=https://your-relay.example.com/api');
+  console.warn('[proxy]   3. 设 CC_MONITOR_TARGET 环境变量（优先级最高，仅本工具使用，不污染 cc 配置）');
+  console.warn('[proxy] 提示：若你的凭据也在环境变量里（ANTHROPIC_AUTH_TOKEN），方式 2 最省事。');
+  console.warn(`[proxy] ${bar}`);
 }
 
 const API_PORT = parsed.port || (parsed.protocol === 'https:' ? 443 : 80);
@@ -578,15 +656,19 @@ function parseJsonBodyCached(req, body) {
   }
 }
 
+// 真正转发上游的 LLM 请求. 代理自身的 /status 轮询、dashboard 静态资源、热加载端点都不是.
+//   Anthropic API: POST /v1/messages
+//   OpenAI 兼容:   POST /v1/chat/completions
+const LLM_REQUEST_PATHS = ['/v1/messages', '/chat/completions', '/completions'];
+function isLLMRequest(req) {
+  const url = req.url || '';
+  return req.method === 'POST' && LLM_REQUEST_PATHS.some((p) => url.includes(p));
+}
+
 function getAgentId(req, body) {
   // 只对真正的 LLM 调用识别成 agent. 其他请求 (GET /version, GET /models, GET /api/tags 这种
   // ollama/服务探测) 即使有 UA 也走 fallback, 不进 agents map, 避免噪音挤占列表.
-  //   Anthropic API: POST /v1/messages
-  //   OpenAI 兼容:   POST /v1/chat/completions
-  const url = req.url || '';
-  const isLLMCall = req.method === 'POST' &&
-    (url.includes('/v1/messages') || url.includes('/chat/completions') || url.includes('/completions'));
-  if (!isLLMCall) {
+  if (!isLLMRequest(req)) {
     // 不识别成 agent, capture ring 仍会记录 (流请求 tab 可看), 但 agentId='unknown'
     // 不进 ensureAgent, 不占 dashboard agent 列表
     return 'unknown';
@@ -979,9 +1061,8 @@ function isAgentActive(a, now, isSubagent) {
 }
 
 // 同 session 是否还有"还在工作"的 subagent。
-// 含本批未过期 + 本批候选 expired 但 active 两种. 后者避免 sub 跑长 tool
-// 期间 main 已 idle 超 2min → 同 batch 全清的 bug (旧 hasActiveSub 用 expiredSet
-// 过滤掉本批要删的 sub → 保护失效).
+// 不按"本批待删候选"过滤: 那会把正在跑长 tool 的 sub 一并排除在保护外, 导致 main
+// 已 idle 超 2min 时被同 batch 全清 (历史 bug). 只要 sub 还活着就返回 true.
 //
 // 关键: 这里"sub 还活着"用宽窗口 — STREAM (openStreams>0) / 上一活动 (lastTs
 // 或 lastActivityTs) 距 now < 10min. 不用 isAgentActive(_, _, true) 那个 60s
@@ -995,7 +1076,7 @@ function isSubAliveForMain(a, now) {
   if (!last) return false;  // 拿不到时间戳 → 当死
   return (now - last) < SUB_ALIVE_FOR_MAIN_MS;
 }
-function sessionHasActiveSub(sessionId, expiredSet, now) {
+function sessionHasActiveSub(sessionId, now) {
   for (const [sid, a] of agents.entries()) {
     if (!agentMeta.get(sid)?.isSubagent) continue;
     if (agentMeta.get(sid).sessionId !== sessionId) continue;
@@ -1185,30 +1266,23 @@ function loadSessionTimeline(sessionId) {
 
 function directBaseUrl() {
   // where cc points when monitoring is OFF (bypass proxy, hit API directly).
-  // 优先: state.previousBaseUrl > settings.json (跳过 localhost) > 官方
-  const state = loadMonitorState();
-  if (state.previousBaseUrl) {
-    try {
-      const u = new URL(state.previousBaseUrl);
-      if (!isProxySelf(u)) return state.previousBaseUrl;
-    } catch (e) {}
-  }
-  const fromSettings = getSettingsBaseUrl();
-  if (fromSettings) {
-    try {
-      const u = new URL(fromSettings);
-      if (!isProxySelf(u)) return fromSettings;
-    } catch (e) {}
-  }
-  return 'https://api.anthropic.com';
+  // 复用 resolveExplicitApiUrl 的单一优先级 (含 ANTHROPIC_BASE_URL 环境变量).
+  // 必须与它一致, 不能各写一套: 本函数的返回值会被 disableMonitoring() 当作回写目标
+  // 写进 settings.json, 而 settings.json 优先级高于环境变量 —— 一旦这里漏掉 env,
+  // 关监控时就会把用户的真实中转站覆盖成 api.anthropic.com, 且用户环境变量救不回来.
+  return resolveExplicitApiUrl() || 'https://api.anthropic.com';
 }
 
 function getBaseUrlStatus() {
   const current = getSettingsBaseUrl();
   const state = loadMonitorState();
+  const unavailableReason = monitorUnavailableReason();
   // cc 原本的 baseurl (开监控时被覆盖前的值, 关监控后已恢复 = 同一个值).
-  // 监控从未开启 / 未设过 ANTHROPIC_BASE_URL → 走 directBaseUrl() 兜底.
-  const originalUrl = state.previousBaseUrl || current || directBaseUrl();
+  // 必须排除「current 就是代理自己」的情况: 崩溃残留态 (previousBaseUrl 已丢但 settings 仍指向
+  // proxy) 下, 直接把 current 当原值会把本代理地址显示成"cc 原本的 URL", 误导用户.
+  const originalUrl = state.previousBaseUrl
+    || (current && current !== PROXY_BASEURL ? current : null)
+    || directBaseUrl();
   return {
     monitoring: current === PROXY_BASEURL,
     current,
@@ -1218,10 +1292,33 @@ function getBaseUrlStatus() {
     directUrl: directBaseUrl(),
     settingsPath: SETTINGS_PATH,
     settingsKey: 'env.ANTHROPIC_BASE_URL',
+    // 监控可否开启: 解析不出真实上游时 false + 原因, dashboard 据此禁用开关并提示.
+    available: unavailableReason === null,
+    availableReason: unavailableReason,
   };
 }
 
+// 监控能否开启 —— 需要能解析出真实上游, 否则开了也是把流量转给占位常量.
+// 注意用 resolveExplicitApiUrl() 而非 BASE_URL: 开着监控时 settings.json 正指向本代理,
+// 必须靠 env / previousBaseUrl 判断, 否则会误判为"无上游"而把自己锁死.
+// 返回 null = 可用; 返回字符串 = 不可用原因 (直接作为 HTTP 400 的 error 回给 dashboard).
+function monitorUnavailableReason() {
+  // 与 resolveExplicitApiUrl 同源判定: 存在「已设置且未被跳过」的来源即可用.
+  const report = upstreamSourceReport();
+  if (report.some((r) => r.raw && !r.why)) return null;
+  const rejected = report.filter((r) => r.raw);
+  // 区分「设了但不可用」与「压根没设」—— 前者照提示去"配置一个新的"是白费功夫.
+  if (rejected.length) {
+    return '已配置的上游地址均不可用：' + rejected.map((r) => `${r.name} ${r.why}`).join('；')
+         + '。请修正该地址后再开启监控。';
+  }
+  return '未配置上游 API 地址（settings.json 的 env.ANTHROPIC_BASE_URL、CC_MONITOR_TARGET、'
+       + 'ANTHROPIC_BASE_URL 环境变量均未设置）。请任选其一配置后再开启监控。';
+}
+
 function enableMonitoring() {
+  const reason = monitorUnavailableReason();
+  if (reason) throw new Error(reason);
   const current = getSettingsBaseUrl();
   const patch = { userDisabled: false };  // user intent: wants monitoring
   if (current !== PROXY_BASEURL) {
@@ -1254,27 +1351,6 @@ function restoreBaseUrlIfStale() {
   return { restored: false };
 }
 
-// Startup auto-enable: monitoring was auto-closed on exit (restoreBaseUrlIfStale),
-// so re-open it by default — UNLESS the user explicitly opted out (userDisabled).
-// Mirrors restoreBaseUrlIfStale as the second startup-phase action. Failures
-// (e.g. settings.json lacks ANTHROPIC_BASE_URL) are caught and logged: dashboard
-// still loads and shows monitoring OFF for manual control.
-function applyStartupPreference() {
-  const { userDisabled } = loadMonitorState();
-  if (userDisabled === true) {
-    console.log('[startup] monitoring stays OFF (user opted out)');
-    return { enabled: false, reason: 'user_disabled' };
-  }
-  try {
-    const status = enableMonitoring();
-    console.log('[startup] monitoring auto-enabled');
-    return { enabled: true, status };
-  } catch (e) {
-    console.error('[startup] auto-enable failed:', e.message);
-    return { enabled: false, reason: 'enable_failed', error: e.message };
-  }
-}
-
 // Pre-load static assets at module init (fail fast, no per-request I/O in prod).
 const DASHBOARD_PATH = path.join(MONITOR_DIR, 'dashboard.html');
 const dashboardHtml = (() => {
@@ -1304,29 +1380,9 @@ function serveMiniHtml() {
   catch (e) { return miniHtml; }
 }
 
-// Collect the full request body into a single Buffer. Returns a promise so callers
-// can await it inside the request handler. Caps body size to avoid OOM on runaway
-// uploads.
-const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10 MB
-function collectBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    let total = 0;
-    req.on('data', (c) => {
-      total += c.length;
-      if (total > MAX_BODY_BYTES) {
-        reject(new Error('body too large'));
-        req.destroy();
-        return;
-      }
-      chunks.push(c);
-    });
-    req.on('end', () => resolve(Buffer.concat(chunks)));
-    req.on('error', reject);
-  });
-}
-
 const server = http.createServer((req, res) => {
+  // 只记转发上游的业务请求: /status 被 dashboard 200ms 轮询一次, 记进来会刷屏
+  if (isLLMRequest(req)) logLine('get到一条请求');
   // Status endpoint — pure memory, no I/O
   if (req.url === '/status') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1761,9 +1817,7 @@ const server = http.createServer((req, res) => {
   // Collect request body: 全量 buffer, 配合 capture ring 走 LRU 淘汰 (见顶部注释).
   // 不再按字节截断 — copy-as-curl / dashboard SSE 详情需要完整数据.
   const chunks = [];
-  let reqBodySize = 0;
   req.on('data', chunk => {
-    reqBodySize += chunk.length;
     chunks.push(chunk);
   });
   req.on('end', () => {
@@ -1815,7 +1869,7 @@ const server = http.createServer((req, res) => {
         const _agentChanged = _cap.agentId !== agentId;
         _cap.agentId = agentId;
         _cap.reqBody = bodyBuf;
-        _cap.reqBodySize = reqBodySize;
+        _cap.reqBodySize = bodyBuf.length;
         _cap.reqBodyTruncated = false;
         _cap.lastAccessTs = Date.now();
         if (_agentChanged) _broadcastRequest(_captureSummary(_cap));
@@ -2247,6 +2301,12 @@ const server = http.createServer((req, res) => {
             // ★ 收尾广播: 缺则 dashboard 该行永远卡橙 (流中断也要褪色)
             _finalizeRequestCapture(cid);
           }
+          // ★ 必须收掉客户端连接. 上游流中断后若只清内部状态, cc 侧连接会一直挂着等数据
+          // (既无 end 也无 reset) → 表现为「卡死不动」, 直到 SDK / 用户自己超时.
+          // 用 destroy 而非 end: 被截断的 SSE 必须让 cc 看到连接重置, 走 SDK 自动重试;
+          // 若用 end, cc 会把半截回复当成"流正常结束"而接受. 与非 SSE 路径的 res.destroy() 对齐.
+          // (契约用例 C10a 守住这条; 改前此路径缺失 → cc 挂死, 用例首跑即红.)
+          try { res.destroy(); } catch (_) {}
         });
         // client(cc) 断开: 区分「正常 end 后的 close」(proxyRes 已 end → stream.closed, 跳过) vs
         // 「打断」(stream 没 end → 补完整收尾 + 终止上游). 不收尾则 openStreams 不减 → 状态卡 STREAM,
@@ -2454,13 +2514,12 @@ function runCleanupPass() {
     }
   }
   // pass 2: main 被同 session 活 sub 救回. orphanForced (sub) 不救 — 父已死.
-  const expiredSet = new Set(candidates.map(c => c.id));
   const saved = [];
   for (let i = candidates.length - 1; i >= 0; i--) {
     const c = candidates[i];
     if (c.isSubagent) continue;  // 只保护 main
     if (c.orphanReason) continue;  // 已被 pass 0 标记为强制清 (理论上 main 不会进 pass 0)
-    if (sessionHasActiveSub(c.sessionId, expiredSet, now)) {
+    if (sessionHasActiveSub(c.sessionId, now)) {
       saved.push(c);
       candidates.splice(i, 1);
       keptAgents.add(c.id);
@@ -2548,7 +2607,6 @@ function stopProxy() {
 exports.startProxy = startProxy;
 exports.stopProxy = stopProxy;
 exports.restoreBaseUrlIfStale = restoreBaseUrlIfStale;
-exports.applyStartupPreference = applyStartupPreference;
 exports.getPort = () => PORT;
 
 // 直接跑（node proxy.js）也支持

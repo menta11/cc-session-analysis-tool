@@ -919,17 +919,23 @@ function renderMonitor() {
   // 原 URL: cc 真实指向的 baseurl. 监控开 = 被顶替前的值; 监控关 = 当前已恢复的值. 同源显示.
   const origEl = document.getElementById('originalUrl');
   if (origEl) origEl.textContent = monitorState.originalUrl || monitorState.directUrl || '?';
+  // available=false: 解析不出上游 (env / settings 都没有) → 开关锁死, 提示怎么修.
+  // 不锁的话点下去 400 弹 alert, 但用户看不出该改什么.
+  const available = monitorState.available !== false;
   monitorBtn.className = 'switch ' + (on ? 'on' : '');
   monitorBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  monitorBtn.disabled = !available;
   const mtxt = document.getElementById('monitorText');
-  mtxt.textContent = on ? '运行中' : '已停用';
+  mtxt.textContent = !available ? '不可用' : (on ? '运行中' : '已停用');
   mtxt.className = 'switch-text ' + (on ? 'on' : 'off');
-  monitorBtn.title =
-    `点击将修改文件：\n${sp}\n\n` +
-    `配置项：${key}\n` +
-    `当前值：${from}（${on ? '监控中' : '直连，无监控'}）\n` +
-    `将改为：${to}\n\n` +
-    `仅改这一项，settings.json 其他配置不动`;
+  monitorBtn.title = !available
+    ? `监控不可用：\n${monitorState.availableReason || '未解析出上游 API 地址'}\n\n` +
+      `当前 origUrl: ${monitorState.originalUrl || '?'}`
+    : `点击将修改文件：\n${sp}\n\n` +
+      `配置项：${key}\n` +
+      `当前值：${from}（${on ? '监控中' : '直连，无监控'}）\n` +
+      `将改为：${to}\n\n` +
+      `仅改这一项，settings.json 其他配置不动`;
 }
 
 async function loadMonitor() {
