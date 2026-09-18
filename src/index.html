@@ -44,6 +44,22 @@
         --cat-direct: #0072b2;
         --cat-delegated: #d55e00;
         --cat-compute: #009e73;
+        /* 日志视图的「用户」行（一轮的起点）。它与「等用户」的灰不是一回事：那是等待，
+           这是人真正说的话 —— 撞色会让两种行在表里分不出来。红紫是 Okabe-Ito 里唯一
+           还没被其它类别占用的色相（橙撞 delegated、天蓝撞 direct、黄不好辨认）。 */
+        --cat-user: #cc79a7;
+        /* workflow（一次调用跑一整套子 agent）。Okabe-Ito 那八个色里，剩下的黄在亮色主题上读不清、
+           天蓝与 direct 撞，所以 workflow 另取一个紫 —— 与已用的五个色相在色相环上都隔得开
+           （最近的 --cat-user 是红紫，差着一个色阶）。 */
+        --cat-workflow: #6d3bd4;
+        /* 类别色的淡底（类型徽章）：与 --accent-soft / --danger-soft 同一套写法，
+           不用 color-mix() —— 徽章底色要跟主题走，而不是由原色现算 */
+        --cat-wait-soft: rgba(107, 114, 128, 0.12);
+        --cat-direct-soft: rgba(0, 114, 178, 0.12);
+        --cat-delegated-soft: rgba(213, 94, 0, 0.12);
+        --cat-compute-soft: rgba(0, 158, 115, 0.12);
+        --cat-user-soft: rgba(204, 121, 167, 0.12);
+        --cat-workflow-soft: rgba(109, 59, 212, 0.12);
 
         /* 字体 */
         --font-sans: system-ui, -apple-system, "Segoe UI", "PingFang SC",
@@ -114,6 +130,14 @@
         --cat-direct: #4c9ffb;
         --cat-delegated: #f59e0b;
         --cat-compute: #34d399;
+        --cat-user: #e79fc4;
+        --cat-workflow: #a98bf5;
+        --cat-wait-soft: rgba(156, 163, 175, 0.13);
+        --cat-direct-soft: rgba(76, 159, 251, 0.13);
+        --cat-delegated-soft: rgba(245, 158, 11, 0.13);
+        --cat-compute-soft: rgba(52, 211, 153, 0.13);
+        --cat-user-soft: rgba(231, 159, 196, 0.13);
+        --cat-workflow-soft: rgba(169, 139, 245, 0.13);
 
         --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
         --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);

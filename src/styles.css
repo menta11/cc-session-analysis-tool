@@ -144,6 +144,87 @@
   background: var(--bg-hover);
 }
 
+/* ---------- 日志表行（LogView） ---------- */
+.lv-row {
+  transition: background var(--transition-fast);
+  border-bottom: 1px solid var(--border);
+}
+/*
+ * 模型响应与它发起的工具调用是同一件事的两半：用一条左侧竖线把两行圈成一组，
+ * 组头去掉下边框，让它们贴成一块而不是两条并列记录的观感。
+ * 竖线走绝对定位 —— 行是 flex 布局，任何占位的边框/内边距都会把后续列整体推偏。
+ */
+.lv-row-lead,
+.lv-row-member {
+  position: relative;
+}
+.lv-row-lead {
+  border-bottom: none;
+}
+/* 展开的那一行与它下面的内容是一块：行自己那条下边框会让这块被一条横线劈开 */
+.lv-row-open {
+  border-bottom: none;
+}
+.lv-row-lead::before,
+.lv-row-member::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--border-strong);
+}
+.lv-row:hover,
+.lv-row-stripe:hover,
+.lv-row-open:hover {
+  background: var(--bg-hover);
+}
+.lv-row-stripe,
+.lv-row-open {
+  background: var(--bg-subtle);
+}
+/* 从时间栏跳过来的那一行：短暂高亮（由 LogView 在 1.6s 后摘掉 class）。
+   放在 stripe/open 之后 —— 同特异性下靠后者胜出。 */
+.lv-row-flash {
+  background: var(--bg-active);
+}
+
+/*
+ * 展开区：一条记录展开出来的全部内容（面板 + 子 agent 记录）都在这一个容器里。
+ *
+ * 让它读起来是「上面那一行的内容」而不是另起一块区域，靠三件事：
+ *   1) 与行同一底色，且行的下边框已被 `.lv-row-open` 摘掉 —— 中间没有横线劈开；
+ *   2) 左侧一条竖线，走的是 `.lv-row-lead::before` 那套语言（同位置 left: 4px、同色、同宽），
+ *      展开的行自己也画同一条，于是从上到下贯成一条；
+ *   3) 左内边距与 `.lv-row` 的 padding-left 相同（12px），正文与行的列在同一起点上。
+ * 面板卡片本身照旧（圆角 + 边框 + 白底），所以层级是「一行的内容 → 若干张卡片」。
+ */
+.lv-detail {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 12px 6px;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+}
+.lv-row-open::before,
+.lv-detail::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--border-strong);
+}
+.lv-row-open {
+  position: relative;
+}
+
 /* ---------- 类别图例 ---------- */
 .legend {
   display: flex;

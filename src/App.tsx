@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnalyzerPage } from './pages/AnalyzerPage'
 import { MonitorPage } from './pages/MonitorPage'
 
@@ -20,7 +20,7 @@ function getInitialTheme(): Theme {
     : 'light'
 }
 
-/** 本地 AI 会话/请求分析工具集：会话分析（离线 JSONL）+ 实时监控（内嵌 cc-monitor proxy） */
+/** Claude 会话工具集：会话分析（离线 JSONL）+ 实时监控（内嵌 cc-monitor proxy） */
 export function App(): JSX.Element {
   const [page, setPage] = useState<Page>('analyzer')
   // 监控页懒挂载：首次切到才建 iframe, 之后保持挂载 (切换零开销, 会话分析页状态也不丢)
@@ -29,13 +29,13 @@ export function App(): JSX.Element {
   const [copiedTip, setCopiedTip] = useState<string | null>(null)
   const copiedTimerRef = useRef<number | null>(null)
 
-  /** 复制并显示提示气泡 1 秒 */
-  const handleCopy = (text: string, tip: string): void => {
+  /** 复制并显示提示气泡 1 秒。useCallback：它经 AnalyzerPage 传到 memo 化的会话行，换身份会让整表重渲染 */
+  const handleCopy = useCallback((text: string, tip: string): void => {
     void navigator.clipboard.writeText(text)
     setCopiedTip(tip)
     if (copiedTimerRef.current) window.clearTimeout(copiedTimerRef.current)
     copiedTimerRef.current = window.setTimeout(() => setCopiedTip(null), 1000)
-  }
+  }, [])
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme

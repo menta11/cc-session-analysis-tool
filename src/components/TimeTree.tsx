@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Session } from '../../core/parser/types'
 import { buildTreeNode, clipTreeToWindow, type Segment, type TreeNode } from '../../core/view/treeView'
-import { clampWindow, snapToSegmentBoundary, type ViewWindow } from '../../core/view/window'
+import { clampWindow, dragWindowEdge, snapToSegmentBoundary, type ViewWindow } from '../../core/view/window'
 import { fmtMs, fmtTs, pct } from '../../core/view/format'
+import { Chevron } from './icons'
 
-/** 复制文本到剪贴板，返回是否成功（Electron 渲染进程支持 navigator.clipboard） */
+/** 复制文本到剪贴板，返回是否成功（WebView 支持 navigator.clipboard） */
 async function copyText(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text)
@@ -49,6 +50,14 @@ export function TimeTree(props: {
   selectedId?: string
   viewWindow?: ViewWindow | null
   onWindowChange?: (w: ViewWindow) => void
+  /**
+   * 逐层下标的「初始展开路径」（由 `findToolPath` 算好）。
+   *
+   * 只作**初始**状态用：`open` 仍是各行自己的 state，用户随时能收起 —— 否则「定位」会把
+   * 沿途节点钉死成常开。它由日志视图的「在树视图定位」设置，那时的树是刚挂载的（日志视图
+   * 与树视图互斥渲染），初始 state 正好吃到这份路径。
+   */
+  revealPath?: number[]
 }): JSX.Element {
   const fullTree = buildTreeNode(props.session)
   const rootStart = props.session.startedAt ?? 0
@@ -162,18 +171,16 @@ export function TimeTree(props: {
       // 轨道显示可视区，拖动按可视区时间换算
       const ts = clampedVisStart + ratio * visDuration
       // 只改被拖的滑块，另一个锚定不动（不 clamp 整个窗口，避免未拖滑块被扩展）
-      let start = d.startTs
-      let end = d.endTs
-      if (d.which === 'start') {
-        start = Math.min(ts, end - MIN_WINDOW)
-        start = Math.max(rootStart, start)
-      } else {
-        end = Math.max(ts, start + MIN_WINDOW)
-        end = Math.min(rootEnd, end)
-      }
-      d.startTs = start
-      d.endTs = end
-      props.onWindowChange({ start, end })
+      const next = dragWindowEdge(
+        { start: d.startTs, end: d.endTs },
+        d.which,
+        ts,
+        { start: rootStart, end: rootEnd },
+        MIN_WINDOW,
+      )
+      d.startTs = next.start
+      d.endTs = next.end
+      props.onWindowChange(next)
     }
     const up = (): void => {
       const d = sliderDragRef.current
@@ -254,8 +261,9 @@ export function TimeTree(props: {
         }}
       >
         <span style={{ width: CHEVRON }} />
+        {/* 手型而非 `copy`：后者 macOS 画成加号（右键复制的能力不变） */}
         <span
-          style={{ flex: 1, cursor: 'copy' }}
+          style={{ flex: 1, cursor: 'pointer' }}
           title={`右键复制会话 ID：${props.session.sessionId}`}
           onContextMenu={(e) => {
             e.preventDefault()
@@ -422,6 +430,8 @@ export function TimeTree(props: {
           node={c}
           ganttNode={fullTree.children?.[i]}
           depth={0}
+          index={i}
+          revealPath={props.revealPath}
           stripe={i % 2 === 1}
           visStart={clampedVisStart}
           pxPerMs={pxPerMs}
@@ -443,6 +453,9 @@ function Row(props: {
   node: TreeNode // 统计节点（窗口裁剪后：ms/count/占比）
   ganttNode?: TreeNode // 甘特节点（全会话原始段，甘特渲染用）
   depth: number
+  /** 本行在兄弟中的下标（与 revealPath 的层号配对） */
+  index: number
+  revealPath?: number[]
   stripe?: boolean
   visStart: number
   pxPerMs: number
@@ -450,8 +463,14 @@ function Row(props: {
   onSelect: (n: TreeNode) => void
   selectedId?: string
 }): JSX.Element {
-  const { node, ganttNode, depth, stripe, visStart, pxPerMs, ganttW, onSelect, selectedId } = props
+  const { node, ganttNode, depth, index, revealPath, stripe, visStart, pxPerMs, ganttW, onSelect, selectedId } = props
   const [open, setOpen] = useState(depth < 1)
+  // 定位到达时展开沿途节点。写成 effect 而不是初始 state：树在切视图时**不卸载**
+  // （否则分隔条比例与滚动位置会丢），初始 state 只在首次挂载那一刻读得到路径。
+  // revealPath 只在「定位」时换新数组，所以用户此后手动收起不会被它顶回来。
+  useEffect(() => {
+    if (revealPath?.[depth] === index) setOpen(true)
+  }, [revealPath, depth, index])
   const hasKids = !!node.children?.length
   const expandable = !!node.expandable && !!node.childSession
   const branch = hasKids || expandable
@@ -504,10 +523,10 @@ function Row(props: {
 
       {open && branch && hasKids &&
         node.children!.map((c, i) => (
-          <Row key={c.id} node={c} ganttNode={ganttNode?.children?.[i]} depth={depth + 1} visStart={visStart} pxPerMs={pxPerMs} ganttW={ganttW} onSelect={onSelect} selectedId={selectedId} />
+          <Row key={c.id} node={c} ganttNode={ganttNode?.children?.[i]} depth={depth + 1} index={i} revealPath={revealPath} visStart={visStart} pxPerMs={pxPerMs} ganttW={ganttW} onSelect={onSelect} selectedId={selectedId} />
         ))}
       {open && branch && expandable && (
-        <ChildTree child={node.childSession!} depth={depth + 1} visStart={visStart} pxPerMs={pxPerMs} ganttW={ganttW} onSelect={onSelect} selectedId={selectedId} />
+        <ChildTree child={node.childSession!} depth={depth + 1} revealPath={revealPath} visStart={visStart} pxPerMs={pxPerMs} ganttW={ganttW} onSelect={onSelect} selectedId={selectedId} />
       )}
     </div>
   )
@@ -517,6 +536,7 @@ function Row(props: {
 function ChildTree(props: {
   child: Session
   depth: number
+  revealPath?: number[]
   visStart: number
   pxPerMs: number
   ganttW: number
@@ -526,8 +546,8 @@ function ChildTree(props: {
   const full = buildTreeNode(props.child)
   return (
     <>
-      {full.children!.map((c) => (
-        <Row key={c.id} node={c} depth={props.depth} visStart={props.visStart} pxPerMs={props.pxPerMs} ganttW={props.ganttW} onSelect={props.onSelect} selectedId={props.selectedId} />
+      {full.children!.map((c, i) => (
+        <Row key={c.id} node={c} depth={props.depth} index={i} revealPath={props.revealPath} visStart={props.visStart} pxPerMs={props.pxPerMs} ganttW={props.ganttW} onSelect={props.onSelect} selectedId={props.selectedId} />
       ))}
     </>
   )
@@ -538,6 +558,7 @@ function Legend(props: { windowLabel?: string }): JSX.Element {
     ['等用户', 'var(--cat-wait)'],
     ['直接工具', 'var(--cat-direct)'],
     ['委派 Agent', 'var(--cat-delegated)'],
+    ['workflow', 'var(--cat-workflow)'],
     ['LLM 计算', 'var(--cat-compute)'],
   ]
   return (
@@ -600,25 +621,6 @@ function Gantt(props: { segments?: Segment[]; visStart: number; pxPerMs: number;
         )
       })}
     </div>
-  )
-}
-
-function Chevron(props: { open: boolean }): JSX.Element {
-  return (
-    <svg
-      className={`chevron${props.open ? ' chevron-open' : ''}`}
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M9 6l6 6-6 6" />
-    </svg>
   )
 }
 
