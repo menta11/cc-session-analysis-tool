@@ -1,71 +1,70 @@
-# CC Session Analysis Tool
+# Claude Code 会话耗时分析工具
 
-**Claude Code 会话耗时分析工具** — 递归「工作 vs 等待」时间分解 + AI 堵塞点分析（Electron 桌面应用，Win / Mac）
+一个 Tauri v2 桌面应用（macOS + Windows + Linux），解析 Claude Code 的会话 transcript
+（`~/.claude/projects/<sanitized-cwd>/<sessionId>.jsonl`），递归分解一段会话的总耗时时间花在了哪里——
+LLM 思考、本地工具（直接 Bash/其它 vs 委派子 agent）、等用户。子 agent transcript 递归挂载，
+可逐层下钻某个 `Agent` 调用到底耗在哪。另提供「AI 报告」：shell 调用本地 `claude` CLI，
+基于结构化摘要生成 markdown 堵塞点分析。
 
-[English](./README.en.md) · **简体中文**
+## 核心理念
 
----
+**总耗时不变式**：`wallMs = waitUser + localTool + compute`
 
-## 这是什么
+- `waitUser`：AskUserQuestion 区间 + 轮间间隙（人离开但后台 agent 在跑的部分让给委派，不算空闲）
+- `localTool`：直接工具（Bash/其它）+ 委派子 agent 的调度区间
+- `compute`：模型思考（总耗时内其余覆盖的补集，派生而来）
 
-一个 Electron 桌面应用，读取 Claude Code 的会话 transcript
-（`~/.claude/projects/<sanitized-cwd>/<sessionId>.jsonl`），
-递归地拆解一场会话的墙钟时间花在了哪里：
+并行子 agent 的调度区间会重叠，因此取**并集时长**而非求和，避免「并行膨胀」。
+子 agent 优先用其自身 transcript 的实际总耗时（异步后台 agent 的真实运行时长）。
 
-- **LLM thinking（compute）** — 模型思考时间（派生：墙钟扣去其他段）
-- **本地工具（local tool）**
-  - **direct** — 直接执行的 Bash / 其他工具
-  - **delegated** — 委派给子 agent 的 `Agent` / `Task` 调用
-- **等待用户（wait user）** — `AskUserQuestion` 区间 + 轮间间隙
-
-子 agent 的 transcript 会被递归挂到分发它的 `Agent` 调用上，可逐层下钻；
-并行的子 agent 区间取**并集**（而非求和），避免「并行虚高」。
-
-此外内置「AI 报告」：调用本机 `claude` CLI，基于结构化 digest 产出一份
-markdown 堵塞点分析。
-
-> 核心不变式：`wallMs = waitUser + localTool + compute`，由区间求补在 `breakdownOf` 中保证。
-
-## 功能
-
-- 📂 自动扫描 `~/.claude/projects/` 下所有顶层会话（按 mtime 倒序）
-- 🌳 递归时间分解树：可展开下钻到任意层级的子 agent
-- 🎨 Gantt 风格区间 + 时间条（Okabe-Ito 色盲安全配色，CSS 变量驱动，明/暗主题）
-- 🔗 子 agent transcript 自动链接（按 `agentId`，含 result 文本正则兜底）
-- 🤖 AI 报告：整会话分析 / 单节点诊断两种模式，流式回传
-- 🖥️ 一键在新终端 `claude --resume <id>` 继续会话
-- 🧪 `core/` 纯逻辑零框架依赖、全单测覆盖
-
-## 前置要求
-
-- [Node.js](https://nodejs.org/) ≥ 18
-- npm（随 Node 附带）
-- **（可选，仅 AI 报告功能需要）** 本机已安装并登录 `claude` CLI
-
-## 快速开始
+## 命令
 
 ```bash
-npm install          # 安装依赖
-npm run dev         # 开发模式（main + renderer 热重载）
+npm install              # 装依赖
+npm run dev              # tauri dev（Rust 侧自动重启 + 渲染层 HMR）
+npm run build            # tauri build（产物落 Tauri 自己的工作区 src-tauri/target/release/bundle/）
+npm run build:renderer   # 只构建渲染层（Vite）→ out/tauri-renderer/，不碰 Rust
+npm test                 # vitest run（一次性）
+npm run test:watch       # vitest watch
+npm run typecheck        # tsc --noEmit（tsconfig.node.json + tsconfig.web.json）
+
+# justfile 里的常用入口（等价包装 + 两个重的套件）
+just dev                 # = npm run dev
+just test-rust           # cargo test
+just test-contract       # 构建 proxy-standalone + 跑 Node↔Rust 差分契约套件
+just ci                  # typecheck + test + 体积护栏
 ```
 
-构建 / 预览：
+## 打包
 
 ```bash
-npm run build       # 构建 main / preload / renderer 三套 bundle → out/
-npm run preview     # 运行构建产物
+just package             # 三平台都打（本机打不了的那个打印一行原因后跳过）
+just package mac         # macOS：.app + .dmg
+just package win         # Windows：NSIS Setup
+just package linux       # Linux：deb + rpm + AppImage（非 Linux 宿主进容器，两个架构都打）
+just releases            # 只收拢不构建（bundle/ 里已有当前版本产物时用）
+
+just package-linux-offline   # 另出「自带依赖」的离线安装包 → releases/*.tar.gz
+just assert-linux-offline    # 断网重打一遍 Linux 包，证明构建阶段零下载
 ```
 
-## 常用命令
+同一平台在不同宿主上的打法不同，分派规则写在 `build/package.mjs` 一处，不在 justfile 里：
+macOS 只能在 macOS 上打；Windows 在 Windows 上是原生的、在 macOS 上经 `cargo-xwin` 交叉；
+Linux 在 Linux 上是原生的、在别的宿主上进容器（见 `build/linux/`）。
 
-| 命令 | 说明 |
-| --- | --- |
-| `npm run dev` | electron-vite 开发模式（热重载） |
-| `npm run build` | 构建全部三个 bundle 到 `out/` |
-| `npm run preview` | 运行已构建的应用 |
-| `npm test` | vitest 一次性跑全部测试 |
-| `npm run test:watch` | vitest 监听模式 |
-| `npm run typecheck` | `tsc --noEmit`（node + web 两套 tsconfig） |
+交付物只出现在仓库根的 `releases/`，**平铺无子目录**。Tauri CLI 把产物写进
+`src-tauri/target/release/bundle/<格式>/`（它的固定布局，没有配置项可改），所以 `package` 末尾会跑一次
+`build/collect-releases.mjs` 把它们搬过来 —— 只搬 `package.json` 当前版本的那些，旧版本残留会被清掉，
+搬完 `bundle/` 里不再留第二份。
+
+macOS 的 dmg 制作会调 AppleScript 让 Finder 摆好窗口图标，这一步需要**「系统设置 → 隐私与安全性 →
+自动化」里给终端放行 Finder**。首次跑会弹授权框；弹不出来（无人值守/无 GUI 会话）会以
+`bundle_dmg.sh` 失败告终，此时可用 `CI=true just package mac` 跳过摆图标那一步（dmg 照常可用，只是打开后
+窗口是默认排布）。
+
+容器链路的 Linux 包默认只出 deb + rpm（这两种不需要任何外网资源）；要 AppImage 得显式开
+`BUNDLES=deb,rpm,appimage just package linux` —— 它的 linuxdeploy 由 tauri 打包器每次从 GitHub
+现下、解到 `/tmp`，没有缓存能力。
 
 跑单个测试：
 
@@ -74,52 +73,48 @@ npx vitest run test/parser.test.ts
 npx vitest run -t "parses session metadata and turn structure"
 ```
 
-本项目无独立 lint 脚本；`tsc --noEmit`（`strict` + `noUnusedLocals` + `noUnusedParameters`）
-即是类型 / 质量门禁。提 PR 前请先 `npm run typecheck`。
+无独立 lint 脚本；`tsc --noEmit`（`strict` + `noUnusedLocals` + `noUnusedParameters`）即质量门禁。
+声明完成前请跑 `npm run typecheck`。
 
-## 真实样本烟雾测试（路径自填）
+## 架构
 
-仓库提供路径留空的模板
-[`test/real-sample.smoke.template.ts`](./test/real-sample.smoke.template.ts)：
+数据流是单向管线：**parse → link → model → view/AI**。
 
-1. 复制为 `test/real-sample.smoke.test.ts`
-2. 把 `BASE` / `MAIN` / `PROJECTS_ROOT` 改成你本机的一份会话：
-   `~/.claude/projects/<sanitized-cwd>/<sessionId>.jsonl`
-3. 视需要把 `expect(...)` 数值改成你样本的真实值（不同会话数值不重合，模板只做结构性校验）
-4. `npx vitest run test/real-sample.smoke.test.ts`
+| 层 | 职责 |
+|---|---|
+| `core/parser/` | JSONL → Session 树（两遍解析、per-line 容错、tool_use↔tool_result 配对算单次耗时） |
+| `core/discovery/` | 扫描项目目录、反解 sanitized-cwd、建 agentId→path 索引、递归挂载子 agent transcript |
+| `core/model/` | 时间分解模型（工具分类、区间并集、总耗时不变式） |
+| `core/view/` | 纯数据 → 显示结构（树、甘特段、格式化器） |
+| `core/ai/` | 给本地 `claude` CLI 拼提示词（摘要 digest + 取证文件地图） |
+| `src-tauri/` | Tauri v2 宿主：窗口/菜单/托盘/悬浮窗、fs 与子进程命令、内嵌 MITM 代理 |
+| `src/` | React 渲染层：会话列表、时间树、详情面板、AI 报告 |
 
-模板文件 (`.template.ts`) 既不被 vitest 收集，也不进 typecheck，纯参考用。
+`core/` 无任何框架依赖（不碰 React/Tauri），全部单测覆盖。Rust/React 仅作薄适配层。
 
-## 项目结构
+### 构建布局（Tauri v2 两半）
 
-```
-core/        # 纯逻辑（无 React / Electron 依赖），全单测
-  parser/    # JSONL → Session 树（两遍扫描、容错解析、tool_use↔tool_result 配对）
-  discovery/ # 扫描顶层会话 + 子 agent transcript 定位与递归链接
-  model/     # 时间分解模型：classify / timeline（区间并集）/ timeBreakdown（不变式）
-  view/      # 纯数据 → 显示结构（树 + 格式化）
-  ai/        # 给本地 claude CLI 的 prompt：digest + fileMap + analyzeRequest
-electron/    # 宿主进程：窗口 / 菜单 / IPC；claude CLI spawn；终端打开
-src/         # React 渲染层（App / SessionList / TimeTree / DetailPanel / AiReport）
-test/        # vitest 单测 + fixtures + real-sample 模板
-```
+- **渲染层** → `vite.tauri.config.ts` 把 `src/`（React，别名 `@` → `src/`）打进
+  `out/tauri-renderer/`，由 `src-tauri/tauri.conf.json` 的 `frontendDist` 消费。
+  `devUrl` 硬编码 `http://localhost:5173`，所以该 config 里 `server.strictPort = true`——
+  端口被占时宁可当场失败，也不让 Vite 悄悄换端口、而 Tauri 打开一个空白窗口。
+- **Rust 宿主** → `src-tauri/`（cargo）。业务逻辑**不在** Rust 里：`core/` 的 TS 代码经
+  `src/api/` 注入的桥拿 IO，Rust 只提供 syscall / 子进程 / 窗口 / 内嵌代理。
 
-数据流是单向管道：**parse → link → model → view / AI**。
-`core/` 是被三端（main / preload / renderer）共享的纯逻辑层，Electron 与 React
-只是它上面的薄适配层。
+`vendor/cc-monitor/` 是**逐字搬运的上游参考实现**（Node MITM 代理 + dashboard/mini 页面 +
+tray 图标），**只读**：`src-tauri/` 编译期把其中几个资产 `include_str!` 进二进制，
+`test/proxy-contract/` 把它当**差分黄金基准**。详见 `vendor/cc-monitor/README.md`。
 
-## 技术栈
+## 关键约定
 
-- Electron 31 + electron-vite 2（三 bundle：main / preload / renderer）
-- React 18 + react-markdown + remark-gfm
-- TypeScript 5（strict）
-- vitest 2
+- **所有时间为 ms-epoch 数字**，模型层绝不出现 ISO 字符串；`parseTimestamp` 在边界转换。
+- **容错解析是硬规则**：JSONL 逐行 try/catch，坏行进 `parseWarnings`，绝不抛；stream-json、
+  `extractStructuredResult` 同理（未知/异常形状 → `null`，不丢数据）。
+- **`subagent: true` 解析选项**：解析子 agent transcript 时必须传，否则其 `isSidechain` 消息被排除、
+  transcript 看起来是空的。
+- **总耗时不变式** 由 `breakdownOf` 的区间补集保证——任何新类别都必须纳入这套代数，否则甘特与数字会对不上。
 
 ## 非源码目录
 
-`docs/调研/`、`docs/原型/`、`docs/方案设计/` 是调研笔记、参考仓库克隆、原型与设计文档，
-**不属于应用代码**。源代码事实来源是 `core/` + `electron/` + `src/`。
-
-## 许可
-
-在 [MIT License](LICENSE) 下发布 — © 2026 刘孟涛
+`docs/方案设计/` 存放设计文档（耗时分析总方案、AI 报告链路、AI 追问终端链路），**不是**应用一部分。
+当前行为以 `core/` + `src-tauri/` + `src/` 为准。

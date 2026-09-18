@@ -1,39 +1,36 @@
 import { existsSync } from 'node:fs'
-import { describe, it, expect } from 'vitest'
+import { beforeAll, describe, it, expect } from 'vitest'
 import { parseJsonl } from '../core/parser/parse'
+import type { Session } from '../core/parser/types'
 import { buildAgentIndex } from '../core/discovery/agentIndex'
 import { linkSubagents } from '../core/discovery/linkSubagents'
 import { buildDigest, buildDiagnosticFacts, buildFileMap } from '../core/ai/prompt'
 import { buildAnalyzeRequest } from '../core/ai/analyzeRequest'
-import { buildStdin } from '../electron/main/claudeCli'
+import { buildStdin } from '../core/ai/claudeCli'
 import type { Session, ToolCall } from '../core/parser/types'
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 真实样本烟雾测试 · 模板（路径留空，供下载者自行补充）
-// ─────────────────────────────────────────────────────────────────────────────
-// 用法：
-//   1. 复制本文件为  test/real-sample-digest.smoke.test.ts  （把 .template 换成 test）
-//   2. 把下面两个常量换成你本机的真实路径：
-//        PROJECTS_ROOT = ~/.claude/projects/<sanitized-cwd>          （目录）
-//        BASE          = ~/.claude/projects/<sanitized-cwd>/<sessionId>（不含扩展名）
-//      同目录下应有 <sessionId>.jsonl 与 subagents/ 子目录。
-//   3. 跑：  npx vitest run test/real-sample-digest.smoke.test.ts
-//
-// 说明：
-//   - 复制出的 *.smoke.test.ts 已被 .gitignore 拦下，不会进版本库，可放心写死本机值。
-//   - 样本不存在时整组用 describe.skipIf 自动跳过，CI / 他人机器不报错。
-//   - 本模板文件 (.template.ts) 既不被 vitest 收集，也不进 typecheck，纯参考用。
-// ─────────────────────────────────────────────────────────────────────────────
+// ── 模板（不会被 vitest 收录；仅作范例）──────────────────────────────────
+// 用法：复制本文件为 real-sample-digest.smoke.test.ts（去掉 .template），把下面两个常量
+// 换成你本机的真实路径：
+//   PROJECTS_ROOT = ~/.claude/projects/<project>           （projectsRoot，目录）
+//   BASE          = ~/.claude/projects/<project>/<sessionId>（不含扩展名）
+// 同目录下应有 <sessionId>.jsonl 与 subagents/ 子目录。样本不存在时自动跳过。
+// ──────────────────────────────────────────────────────────────────────
 
-// 👇 必填：换成你本机的路径
-const PROJECTS_ROOT = 'C:/Users/your-name/.claude/projects/your-sanitized-cwd'
-const BASE = 'C:/Users/your-name/.claude/projects/your-sanitized-cwd/your-session-id'
+const PROJECTS_ROOT = '<your-projects-root>'
+const BASE = '<your-local-sample>'
 const MAIN = BASE + '.jsonl'
 
 describe.skipIf(!existsSync(MAIN))('real sample — buildDigest smoke', () => {
-  const index = buildAgentIndex(BASE)
-  const main = parseJsonl(MAIN)
-  const { session } = linkSubagents(main, index, (p) => parseJsonl(p, { subagent: true }))
+  let index: Map<string, string>
+  let main: Session
+  let session: Session
+  beforeAll(async () => {
+    index = await buildAgentIndex(BASE)
+    main = parseJsonl(MAIN)
+    // 原地链接：session 与 main 是同一对象（保留原语义）
+    session = (await linkSubagents(main, index, (p) => parseJsonl(p, { subagent: true }))).session
+  })
 
   it('整会话 digest 不崩、含各段、体积有界', () => {
     const d = buildDigest(session)
@@ -80,9 +77,15 @@ describe.skipIf(!existsSync(MAIN))('real sample — buildDigest smoke', () => {
 })
 
 describe.skipIf(!existsSync(MAIN))('real sample — buildFileMap smoke', () => {
-  const index = buildAgentIndex(BASE)
-  const main = parseJsonl(MAIN)
-  const { session } = linkSubagents(main, index, (p) => parseJsonl(p, { subagent: true }))
+  let index: Map<string, string>
+  let main: Session
+  let session: Session
+  beforeAll(async () => {
+    index = await buildAgentIndex(BASE)
+    main = parseJsonl(MAIN)
+    // 原地链接：session 与 main 是同一对象（保留原语义）
+    session = (await linkSubagents(main, index, (p) => parseJsonl(p, { subagent: true }))).session
+  })
 
   it('文件地图不崩、含主文件/子agent文件/深挖线索', () => {
     const m = buildFileMap(session, {
@@ -98,9 +101,15 @@ describe.skipIf(!existsSync(MAIN))('real sample — buildFileMap smoke', () => {
 })
 
 describe.skipIf(!existsSync(MAIN))('real sample — buildAnalyzeRequest node smoke', () => {
-  const index = buildAgentIndex(BASE)
-  const main = parseJsonl(MAIN)
-  const { session } = linkSubagents(main, index, (p) => parseJsonl(p, { subagent: true }))
+  let index: Map<string, string>
+  let main: Session
+  let session: Session
+  beforeAll(async () => {
+    index = await buildAgentIndex(BASE)
+    main = parseJsonl(MAIN)
+    // 原地链接：session 与 main 是同一对象（保留原语义）
+    session = (await linkSubagents(main, index, (p) => parseJsonl(p, { subagent: true }))).session
+  })
 
   it('node 模式：聚焦某子 agent，userMessage 含父子对账/占父/isSubagent', () => {
     const agent = session.turns
@@ -122,9 +131,15 @@ describe.skipIf(!existsSync(MAIN))('real sample — buildAnalyzeRequest node smo
 })
 
 describe.skipIf(!existsSync(MAIN))('real sample — 端到端组装链路 smoke', () => {
-  const index = buildAgentIndex(BASE)
-  const main = parseJsonl(MAIN)
-  const { session } = linkSubagents(main, index, (p) => parseJsonl(p, { subagent: true }))
+  let index: Map<string, string>
+  let main: Session
+  let session: Session
+  beforeAll(async () => {
+    index = await buildAgentIndex(BASE)
+    main = parseJsonl(MAIN)
+    // 原地链接：session 与 main 是同一对象（保留原语义）
+    session = (await linkSubagents(main, index, (p) => parseJsonl(p, { subagent: true }))).session
+  })
   const opts = {
     projectsRoot: PROJECTS_ROOT,
     mainFilePath: MAIN,

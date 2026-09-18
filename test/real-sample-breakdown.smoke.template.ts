@@ -3,23 +3,14 @@ import { describe, it, expect } from 'vitest'
 import { parseJsonl } from '../core/parser/parse'
 import { breakdownOf } from '../core/model/timeBreakdown'
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 真实样本烟雾测试 · 模板（路径留空，供下载者自行补充）
-// ─────────────────────────────────────────────────────────────────────────────
-// 用法：
-//   1. 复制本文件为  test/real-sample-breakdown.smoke.test.ts  （把 .template 换成 test）
-//   2. 把下面 MAIN 换成你本机的一份真实会话 transcript：
-//        ~/.claude/projects/<sanitized-cwd>/<sessionId>.jsonl
-//   3. 跑：  npx vitest run test/real-sample-breakdown.smoke.test.ts
-//
-// 说明：
-//   - 复制出的 *.smoke.test.ts 已被 .gitignore 拦下，不会进版本库，可放心写死本机值。
-//   - MAIN 不存在时整组用 describe.skipIf 自动跳过，CI / 他人机器不报错。
-//   - 本模板文件 (.template.ts) 既不被 vitest 收集，也不进 typecheck，纯参考用。
-// ─────────────────────────────────────────────────────────────────────────────
+// ── 模板（不会被 vitest 收录；仅作范例）──────────────────────────────────
+// 用法：复制本文件为 real-sample-breakdown.smoke.test.ts（去掉 .template），把下面 MAIN
+// 换成你本机的真实会话 transcript 路径：
+//   ~/.claude/projects/<project>/<sessionId>.jsonl
+// 样本不存在时自动跳过。
+// ──────────────────────────────────────────────────────────────────────
 
-// 👇 必填：换成你本机的会话路径
-const MAIN = 'C:/Users/your-name/.claude/projects/your-sanitized-cwd/your-session-id.jsonl'
+const MAIN = '<your-local-sample>.jsonl'
 
 const fmt = (ms: number): string => {
   const s = ms / 1000

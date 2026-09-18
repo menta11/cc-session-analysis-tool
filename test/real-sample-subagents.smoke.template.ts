@@ -5,24 +5,14 @@ import type { Session } from '../core/parser/types'
 import { buildAgentIndex } from '../core/discovery/agentIndex'
 import { linkSubagents } from '../core/discovery/linkSubagents'
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 真实样本烟雾测试 · 模板（路径留空，供下载者自行补充）
-// ─────────────────────────────────────────────────────────────────────────────
-// 用法：
-//   1. 复制本文件为  test/real-sample-subagents.smoke.test.ts  （把 .template 换成 test）
-//   2. 把下面 BASE 换成你本机的一份真实会话（不含扩展名）：
-//        ~/.claude/projects/<sanitized-cwd>/<sessionId>
-//      同目录下应有 <sessionId>.jsonl 与 subagents/ 子目录。
-//   3. 跑：  npx vitest run test/real-sample-subagents.smoke.test.ts
-//
-// 说明：
-//   - 复制出的 *.smoke.test.ts 已被 .gitignore 拦下，不会进版本库，可放心写死本机值。
-//   - BASE 不存在时整组用 describe.skipIf 自动跳过，CI / 他人机器不报错。
-//   - 本模板文件 (.template.ts) 既不被 vitest 收集，也不进 typecheck，纯参考用。
-// ─────────────────────────────────────────────────────────────────────────────
+// ── 模板（不会被 vitest 收录；仅作范例）──────────────────────────────────
+// 用法：复制本文件为 real-sample-subagents.smoke.test.ts（去掉 .template），把下面 BASE
+// 换成你本机的真实会话 transcript 路径（不含扩展名）：
+//   ~/.claude/projects/<project>/<sessionId>
+// 同目录下应有 <sessionId>.jsonl 与 subagents/ 子目录。样本不存在时自动跳过。
+// ──────────────────────────────────────────────────────────────────────
 
-// 👇 必填：换成你本机的会话路径（不含扩展名）
-const BASE = 'C:/Users/your-name/.claude/projects/your-sanitized-cwd/your-session-id'
+const BASE = '<your-local-sample>'
 const MAIN = BASE + '.jsonl'
 
 const countDepth = (s: Session, d: number): number => {
@@ -32,12 +22,12 @@ const countDepth = (s: Session, d: number): number => {
 }
 
 describe.skipIf(!existsSync(MAIN))('real sample — subagent recursive tree', () => {
-  it('links direct children and recurses into grandchildren', () => {
-    const index = buildAgentIndex(BASE)
+  it('links direct children and recurses into grandchildren', async () => {
+    const index = await buildAgentIndex(BASE)
     expect(index.size).toBeGreaterThan(0)
 
     const main = parseJsonl(MAIN)
-    const { session, unresolved } = linkSubagents(main, index, (p) => parseJsonl(p, { subagent: true }))
+    const { session, unresolved } = await linkSubagents(main, index, (p) => parseJsonl(p, { subagent: true }))
 
     const directLinked = session.turns.flatMap((t) => t.toolCalls).filter((tc) => tc.childSession).length
 

@@ -4,197 +4,101 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-An Electron desktop app (Win + Mac) that analyzes Claude Code session transcripts
+A Tauri v2 desktop app (macOS + Windows + Linux) that analyzes Claude Code session transcripts
 (`~/.claude/projects/<sanitized-cwd>/<sessionId>.jsonl`) and produces a recursive
 "work vs wait" time breakdown of where a session's wall-clock went — LLM thinking,
 local tools (direct Bash/other vs delegated sub-agents), and waiting-on-user. Sub-agent
-transcripts are linked recursively so a delegated `Agent` call can be drilled into. A
+transcripts are linked recursively so a delegated `Agent` call can be drilled into. An
 "AI report" feature shells out to the local `claude` CLI to produce a markdown bottleneck
-analysis from the structured digest.
+analysis from the structured digest. A second page hosts an embedded MITM proxy (cc-monitor)
+for live request monitoring.
 
 ## Commands
 
 ```bash
-npm run dev          # electron-vite dev (hot reload main + renderer)
-npm run build       # build all three bundles (main/preload/renderer) → out/
-npm run preview     # run the built app
-npm test            # vitest run (one-shot)
-npm run test:watch  # vitest watch
-npm run typecheck   # tsc --noEmit for both tsconfig.node.json + tsconfig.web.json
+just dev             # tauri dev（Rust 侧改动自动重启 + 渲染层 HMR）
+just build           # 构建本机平台可分发产物 -> src-tauri/target/release/bundle/
+just package <平台>  # 打安装包并收拢进 releases/（mac / win / linux）
+just renderer        # 只构建渲染层，不碰 Rust（快速验证前端）
+just test            # vitest run（一次性）
+just test-watch      # vitest watch
+just typecheck       # tsc --noEmit（node + web 两份 tsconfig）
+just test-rust       # cargo test
+just test-contract   # 构建 Rust proxy-standalone + 跑全部契约用例（Node 与 Rust 两半都跑）
+just ci              # typecheck + test + assert-size（提交前自检）
 ```
 
-Run a single test file / test name:
+等价的 npm 脚本：`npm test` / `npm run typecheck` / `npm run build:renderer`。
+单文件 / 单用例：`just test-one test/parser.test.ts`、`just test-name "用例名"`。
 
-```bash
-npx vitest run test/parser.test.ts
-npx vitest run -t "parses session metadata and turn structure"
-```
+渲染层与 Rust 两侧都有类型/编译门禁 —— 改完跑 `just ci`，改到 Rust 再补 `just test-rust`，
+动过 proxy 的透传 / SSE / header / settings 再加 `just test-contract`。
 
-There is no separate lint script; `tsc --noEmit` under `strict` + `noUnusedLocals` +
-`noUnusedParameters` is the type/quality gate. Run `npm run typecheck` before declaring work done.
+## 必守铁律
 
-## Build layout (electron-vite, three bundles)
+违反这些不会报错，只会静默错。改代码前先过一遍：
 
-`electron.vite.config.ts` defines three independent build entries — keep each file in its
-declared entry or it won't ship:
+- **`core/` 不许碰 Node-only 全局**（`setImmediate` / `Buffer` / `__dirname` / 裸 `process.*`）—— 它是
+  渲染层也要用的代码。yield 用 `core/yield.ts`，IO 走 `core/fsBridge.ts` / `core/procBridge.ts`；按宿主
+  分叉的值用 `typeof process !== 'undefined'` 守卫。`tsconfig.web.json` 会在 typecheck 拦，vitest 在 Node
+  下跑 —— 它**拦不住**。
+- **`core/` 加逻辑必须带 `test/*.test.ts`**：框架无关、IO 走可注入桥，Rust / React 只做薄适配。
+- **解析一律容错**：坏行 → `parseWarnings`，未知形状 → `null` / `other`，禁止在不可信 transcript 数据上抛异常。
+- **时间统一 ms-epoch 数字**：边界处 `parseTimestamp` 转换，模型层不出现 ISO 字符串。
+- **别读没人看的东西**：需要文件内容的特性挂到视口（`metaLoader` + `SessionList` 里的视口观察器）并按
+  `(path, mtime, size)` 缓存，启动成本跟**可见行数**走、不跟会话总数走。唯一例外是「这条会话有没有记录」
+  （`scanProjects` 只读 ≤ 64 KB 文件的头一次，判据进缓存）。
+- **两个视图读同一份数字**：日志视图与树视图是同一份解析的两种聚合，共享数字必须来自共享函数
+  （`breakdownOf` / `CATEGORY_COLORS` / `childWallOf` / `interTurnGaps` / `findToolPath`）——
+  对不上是接线 bug，不是舍入差。
+- **时间分解的代数不许破**：`wallMs = waitUser + localTool + compute` 由区间补集算出（`breakdownOf`），
+  新加的时间类别必须进这个等式，否则甘特图与数字会各说一套。
+- **渲染层三个静默坑**：列表行是 `React.memo` 的，回调必须 `useCallback` 稳定（否则上千行全量重渲）；
+  注册式 effect 要能在自己的 cleanup 之后重新注册（`StrictMode` 在 dev 下是 mount → cleanup → mount）；
+  加载指示器要由「有没有请求在飞」驱动，**不要**由「最终状态到齐了没有」驱动 —— 在这套按需读的设计里
+  后者恒为假。
+- **解析子 agent transcript 必须传 `subagent: true`**，否则 `isSidechain` 消息全被排除、子表空白
+  （`src/api/tauri.ts::loadSession` 是唯一读取处）。
+- **`package.json` 的 `dependencies` 必须恰好是 `["@tauri-apps/plugin-dialog"]`**：渲染层依赖全放
+  `devDependencies`（Vite 打进产物）。`just ci` 里的体积护栏会拦（产物 ≤ 2 MB）。
+- **capability 只列用到的命令，禁止 `core:default` / `dialog:default` 这类通配**：`tauri.conf.json` 开了
+  `build.removeUnusedCommands`，裁剪按 capability 的允许集走 —— 写通配等于把几十条用不到的命令重新标成
+  「已用」、白付裁剪；漏列则命令在构建期被裁掉。`tauri dev` 与 `tauri build` 都设该变量（实测两边都在
+  `target/{debug,release}/build/*/out/` 落了 `allowed-commands.json`），所以错在 dev 阶段就暴露。
+  应用自定义命令与 inlined plugin 不受影响（本仓无 app manifest → `has_app_acl = false`）。
+- **改 `vendor/cc-monitor/proxy.js` 的透传 / SSE 分帧 / header / base URL / settings 改写前**，先跑
+  `just test-contract`。两条铁律：SSE 分帧必须在**字节层**（latin1 定位 `\n\n` 再逐 event
+  utf8 解码，改成 `toString('utf8')` 累积会永久丢字节）；SSE 流出错必须 `res.destroy()` 收掉客户端连接，
+  否则 cc 侧永久挂起。
+- **`vendor/cc-monitor/` 只读**：逐字搬来的上游参考，`include_str!` 进二进制、也是契约套件的差分黄金。
+- **测试不许假设宿主是 POSIX**（开发机是 Windows）：期望路径别用 `node:path` 拼（桥收到的是
+  `core/paths.ts::joinPath` 的 `/` 口径）；`chmod` 造不出「读不到」，读失败要按宿主桥的口径注入；
+  别比对 `sh` 回显的路径字符串（Git Bash 把 `C:\...\Temp` 映射成 `/tmp`），改验落点；
+  `SystemTime` 在 Windows 只有 100 ns 精度，别拿它当纳秒输入的管道 —— 测算式打纯函数。
+- **UI 光标只说真话**：可点击用 `pointer`，只有右键复制用 `default`，**不要用 `copy`**
+  （macOS 渲染成「箭头带加号」，还会盖掉外层行的 `pointer`）。
 
-- **main** → `electron/main/index.ts` (Node, ESM, `externalizeDepsPlugin` keeps runtime deps out of bundle)
-- **preload** → `electron/preload/index.ts` (runs in renderer with contextBridge)
-- **renderer** → `src/index.html` (+ `src/**`, React, alias `@` → `src/`)
+## 目录地图
 
-`core/**/*.ts` is shared pure logic **imported by all three** and covered by `tsconfig.json`.
-`tsconfig.node.json` (electron + core) and `tsconfig.web.json` (src + core) both extend it.
-Renderer has DOM libs + `jsx: react-jsx`; main/preload do not.
+| 目录 | 是什么 |
+|---|---|
+| `core/` | 业务逻辑全部在这（框架无关 + 单测）：`parser/` 解析 JSONL 成会话树、`discovery/` 会话列表与子 agent / workflow 关联、`model/` 时间分解（`wallMs = waitUser + localTool + compute`）、`view/` 数据 → 展示结构（树 / 日志行 / 时间栏）、`ai/` 给本地 `claude` CLI 拼提示词 |
+| `src-tauri/` | Rust 宿主：syscall、子进程、窗口、托盘、内嵌 MITM 代理（`src/proxy/`，与 `vendor/` 那份 Node 实现共用一套契约测试） |
+| `src/` | React 渲染层：`pages/` + `components/` + `api/`（宿主适配层），只做展示与编排 |
+| `vendor/cc-monitor/` | cc-monitor 的 Node 参考实现，**只读**；`include_str!` 进 Rust 二进制，契约套件的差分黄金 |
+| `build/` | 打包与产物收集（`package.mjs` / `collect-releases.mjs` / 体积护栏 / Linux 容器链路） |
+| `test/` | 单测与 fixture；`test/proxy-contract/` 是 Node ↔ Rust 的黑盒差分契约套件 |
+| `docs/` | 调研 / 原型 / 方案设计笔记，**不是现状**，别拿它当权威；源码里也不引用它们 |
 
-## Code map
+## 真实样本冒烟测试
 
-The data flow is a one-way pipeline: **parse → link → model → view/AI**. Everything in
-`core/` is fs/process-touching or pure functions, framework-agnostic and unit-tested in
-isolation. Electron and React are thin adapters over `core/`.
+`test/real-sample*.smoke.template.ts` 是**模板**，不参与 vitest 收集
+（`include: ['test/**/*.test.ts']` 匹配不到 `.template.ts`），也不参与 typecheck。
+用法：复制成去掉 `.template` 的名字（如 `real-sample.smoke.template.ts` →
+`real-sample.smoke.test.ts`），把 `BASE` / `MAIN` / `PROJECTS_ROOT` 填成你自己的会话路径，
+按你的样本调整 `expect(...)` 数值，再跑。
 
-### `core/parser/` — JSONL → Session tree
-- `types.ts` — the central data model. `Session`/`Turn`/`ToolCall`/`AssistantMsg`/`UserMsg`
-  + `StructuredResult` (per-tool-name discriminated union) + `NodeTime`. Field naming is
-  camelCase; all times are ms-epoch numbers.
-- `parse.ts` — `parseJsonl(path, opts?)` / `parseLines(lines, ...)`. **Two-pass**: pass 1
-  reads lines with per-line JSON tolerance, collects session metadata (first-seen-wins),
-  filters noise events (`SKIP_TYPES`), and tracks wall-clock min/max across *all* event
-  types (incl. system/progress) so trailing system events aren't lost. Pass 2 stable-sorts
-  by timestamp, rebuilds `Turn` tree, and pairs `tool_use`↔`tool_result` by `tool_use_id` to
-  compute per-call `durationMs`. The `subagent: true` option keeps `isSidechain` messages on
-  the main line (default false excludes them so sidechain isn't double-counted with the transcript).
-- `blocks.ts` — content-block extraction + usage dict parsing + result preview truncation
-  (`RESULT_PREVIEW_LIMIT = 5KB`).
-- `toolResult.ts` — `extractStructuredResult(toolName, toolUseResult)` maps the top-level
-  `toolUseResult` object into the `StructuredResult` union. Non-object or unknown tool → `null` (never throws, never drops).
-
-### `core/discovery/` — finding & linking sub-agent transcripts
-- `scan.ts` — `scanProjects(root)` lists all top-level sessions under
-  `~/.claude/projects/<project>/` (mtime desc). Skips same-named dirs (subagent sidecar).
-  `defaultProjectsRoot()` is fs-only (Electron overrides via `app.getPath('home')`).
-- `projectDir.ts` — `decodeProjectDir(name)`: reverse the sanitized-cwd dir name to a
-  readable path (Windows `D--foo-bar` → `D:/foo-bar`; Unix `-Users-foo` → `/Users/foo`,
-  lossy on internal `-`).
-- `agentIndex.ts` — `buildAgentIndex(sessionDir)`: scans `subagents/` (preferred),
-  `agents/` (fallback), and `subagents/workflows/<runId>/` for `agent-<id>.jsonl`, building
-  an `agentId → path` map. Filename-direct, never reads file contents.
-- `linkSubagents.ts` — `linkSubagents(session, index, parseChild)`: recursively hangs each
-  sub-agent transcript onto its dispatching `Agent`/`Task` call's `childSession`. Link key
-  is `structuredResult.agentId` first, with a `result`-text regex fallback for async agents
-  that omit a structured `agentId`. Caches by agentId to avoid re-parse and cycles. Returns
-  `unresolved` for diagnosis (never blocks).
-
-### `core/model/` — the time-decomposition model (the conceptual heart)
-- `classify.ts` — `classifyTool(name)`: `Agent`/`Task`→`delegated`, `AskUserQuestion`→`wait-user`,
-  else `direct`.
-- `timeline.ts` — `unionDuration(intervals)`: merge overlapping intervals and return total
-  covered ms. **Critical for parallel sub-agents**: their dispatch intervals overlap, so we
-  take the union (not the sum) to avoid "parallel inflation."
-- `timeBreakdown.ts` — the core invariant: `wallMs = waitUser + localTool + compute`
-  (compute = model thinking, derived as the complement). `sessionIntervals(session)` builds
-  per-category wall-clock intervals (gantt-shaped); `breakdownOf(session)` reduces them to
-  `NodeTime`. `waitUser` = AskUserQuestion intervals + inter-turn gaps, then *minus* any
-  overlap with active tools (person left but a background agent ran → that's delegated, not
-  idle). `compute` is the complement of (waitUser ∪ direct ∪ delegated) within
-  `[startedAt, endedAt]`. `complement()` is exported and reused by the view layer.
-
-### `core/view/` — pure data → display structures
-- `format.ts` — small formatters: `fmtMs` (`1h2m3s`), `pct`, `bar` (█ progress),
-  `fmtRelative`, `fmtSize`.
-- `treeView.ts` — `buildTreeNode(session)`: turns a `Session` into the display tree
-  (`root → waitUser / localTool[direct + delegated[agent…recursive]] / compute`). Each node
-  carries its category color (CSS-var based, Okabe-Ito) and gantt `segments` (absolute ts).
-  Agent nodes are `expandable` when they have a `childSession` (renderer recurses). Direct
-  tools are bucketed: `Bash` alone, everything else → `other`.
-
-### `core/ai/` — building the prompt for the local claude CLI
-- `template.ts` — `getSystemPrompt()` returns `templates/agent-run.md` inlined via Vite
-  `?raw` (build-time). Single template shared by whole-session and node-diagnosis modes.
-- `templates/agent-run.md` — the system prompt: role, strict output format (overview →
-  staged key events table → slow-cause analysis → evidence → optimization), and hard
-  constraints (numbers must be quoted from the given data, never recomputed from raw timestamps).
-- `prompt.ts` — `buildDigest(session, opts?)` produces the markdown "facts" digest
-  (breakdown, time-bucket table, inter-turn gaps, error summary, diagnostic facts, slowest
-  direct tools, full sub-agent table, parallelism). `buildFileMap(session, opts)` produces
-  the evidence map (main file + all sub-agent files sorted by duration + dig hints for top-5
-  slow sub-agents + parallel groups). `DigestOpts.parentAgentCall` switches into node
-  diagnosis mode (adds parent/child reconciliation).
-- `analyzeRequest.ts` — `buildAnalyzeRequest(session, opts)`: orchestrates digest+fileMap.
-  `kind:'whole'` analyzes the whole session; `kind:'node'` recursively locates the
-  `focusToolUseId`'s `Agent` call and its parent session, builds the child's digest
-  (with parent reconciliation) and the child's sub-file-map.
-
-### `electron/` — the host process
-- `main/index.ts` — Electron main: window/menu/IPC. `session:load` parses + links + caches
-  the `Session` (with `agentIndex` + `projectsRoot`) in a `sessionCache` map so `analyze:run`
-  can reassemble the prompt in-process. `projectsRoot` must be the **session's parent dir**
-  (`dirname(path minus .jsonl)`), NOT the session dir itself — otherwise `relOf` strips the
-  whole `<sessionId>.jsonl` down to `.jsonl` (regression covered in `fileMap.test.ts`).
-  `analyze:run` streams chunks back via `analyze:chunk` IPC. `terminal:open` opens an OS
-  terminal on `claude --resume <id>`.
-- `main/claudeCli.ts` — spawns the local `claude` CLI. **Key Windows quirk**: `claude` is a
-  `.cmd` shim that needs `shell:true`, so argv is unsafe (cmd.exe would slice `|` in tables).
-  The system prompt is therefore **inlined into stdin** (`buildStdin`), never passed as
-  `--append-system-prompt` argv. Capability-probes `--help` once (cached) to pick the best
-  output mode: `--include-partial-messages` (true streaming deltas) > plain `stream-json`
-  (whole assistant message) > raw `-p` text. Parses NDJSON stream lines via
-  `parseStreamJsonLine` (tolerant — bad JSON → `other`, never throws).
-- `main/terminal.ts` — `openTerminal(id)`: cross-platform `claude --resume <id>` in a new
-  OS terminal. `id` must be a UUID (guard). **cwd-sensitive**: resume must run from the same
-  cwd as the analysis call, because claude stores sessions under
-  `~/.claude/projects/<sanitize(cwd)>/<id>.jsonl` — different cwd → "No conversation found."
-  Win uses `cmd /c start "" /d <cwd> cmd /k ...`; mac uses `osascript` → Terminal.app.
-- `preload/index.ts` — `contextBridge.exposeInMainWorld('api', …)`. The renderer's only
-  Node-surface. `src/preload.d.ts` types `window.api`.
-
-### `src/` — React renderer
-- `App.tsx` — top-level state: session list (`scanProjects`), loaded `Session`, selected tree
-  node, per-session report state map (keyed by path), theme. Layout: sidebar `SessionList` +
-  a nested `SplitPane` (TimeTree + DetailPanel on top, `AiReport` on the bottom). `analyze()`
-  subscribes to `onAnalyzeChunk` and accumulates streaming text into state.
-- `components/SessionList.tsx`, `TimeTree.tsx` (renders `buildTreeNode` output, recurses on
-  expandable agent nodes), `DetailPanel.tsx` (selected node detail; can trigger node-level
-  `analyze('node', toolUseId)`), `AiReport.tsx` (renders streaming markdown via
-  `react-markdown` + `remark-gfm`; buttons to generate / export .md / open claude terminal),
-  `SplitPane.tsx` (reusable vertical/horizontal splitter).
-- `styles.css` — defines the CSS variables the view layer references (`--cat-wait`,
-  `--cat-direct`, `--cat-delegated`, `--cat-compute`, spacing, typography) for both light/dark.
-
-## Conventions worth knowing
-
-- **All times are ms-epoch numbers.** Never ISO strings in the model layer; `parseTimestamp`
-  converts at the boundary.
-- **`core/` has zero framework deps** (no React, no Electron) and is fully unit-tested.
-  New logic that touches the model should land in `core/` with a `test/*.test.ts`. The
-  Electron/React layers stay thin.
-- **Tolerant parsing is a hard rule.** JSONL rows are decoded per-line with try/catch; bad
-  lines → `parseWarnings`, never thrown. Same for stream-json (`parseStreamJsonLine` →
-  `other`) and `extractStructuredResult` (unknown/odd shape → `null`). Don't introduce throws
-  on untrusted transcript data.
-- **`subagent: true` parse option** must be passed when parsing a sub-agent transcript, else
-  its `isSidechain` messages get excluded and the transcript looks empty.
-- **Wall-clock invariant** `wallMs = waitUser + localTool + compute` is enforced in
-  `breakdownOf` via interval complement — any new category must slot into this algebra or the
-  gantt and the numbers will disagree.
-- Tests use real-ish fixtures under `test/fixtures/` (`mini_session.jsonl` for unit,
-  `sample-session/` with a `subagents/agent-*.jsonl` sidecar for linking).
-- **`test/real-sample*.smoke.test.ts` are gitignored** — they hard-code a machine-local
-  session path under `~/.claude/projects/<sanitized-cwd>/<id>.jsonl` plus sample-specific
-  counts/durations that won't match anyone else's transcript. Path-less, numbers-agnostic
-  `*.smoke.template.ts` files are checked in instead: copy one to its `.smoke.test.ts` name
-  (replace `.template` with `test`), fill in `BASE`/`MAIN`/`PROJECTS_ROOT` with your own
-  session, tune the `expect(...)` values to your sample, and run. Four exist:
-  `real-sample.smoke.template.ts` (all-in-one: parse + breakdown + subagents + digest),
-  plus focused `real-sample-{breakdown,subagents,digest}.smoke.template.ts` variants with
-  deeper per-area assertions (digest truncation, diagnostic facts, parent/child
-  reconciliation). The copy is auto-ignored so you can write local values freely. The
-  templates themselves (`.template.ts`) are neither collected by vitest
-  (`include: test/**/*.test.ts`) nor typechecked (neither node/web tsconfig includes
-  `test/`), so they stay inert until renamed.
-
-## Non-source directories
-
-`docs/调研/`, `docs/原型/`, `docs/方案设计/` are research notes, reference-repo clones,
-prototypes, and design docs — **not** part of the app. Don't edit code there or treat those
-trees as authoritative for current behavior; the source of truth is `core/` + `electron/` +
-`src/`.
+两者都是**本机绝对路径 + 本机样本的具体数字**，所以实际的 `.smoke.test.ts` 已被 `.gitignore`
+忽略（`test/real-sample*.smoke.test.ts`），不会入库。四个模板分别是：
+`real-sample`（一体式：parse + breakdown + subagents + digest）、
+`real-sample-{breakdown,subagents,digest}`（分项，断言更深）。

@@ -1,0 +1,16 @@
+# 构建上下文 = 仓库根目录，这里排掉一切与出包无关的重量。
+# 关键是 target/ 与 node_modules/：前者几百 MB 且由容器内的 cargo 自己产生，
+# 后者含宿主 macOS 的原生二进制（esbuild/rollup），拷进 Linux 容器必崩。
+.git
+.claude
+node_modules
+**/node_modules
+out
+dist
+releases
+src-tauri/target
+src-tauri/gen
+spike
+docs
+.vitest-cache
+.DS_Store
