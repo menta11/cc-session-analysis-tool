@@ -43,6 +43,14 @@ const WITH_APP = process.argv.includes('--with-app')
 /** 三元组目录名 → 安装包惯用的架构串（与 Tauri 给 setup.exe 用的 `x64` 对齐）。 */
 const TRIPLE_ARCH = { x86_64: 'x64', aarch64: 'arm64' }
 
+// 本机构建（`target/release`）的架构串：那条路径没有三元组目录名可切，只能从 Node 取。
+//
+// **不能写成 `TRIPLE_ARCH[process.arch]`**：`TRIPLE_ARCH` 的键是**三元组前缀**
+// （`x86_64` / `aarch64` / `i686`），而 `process.arch` 是 `x64` / `arm64` / `ia32` ——
+// 两套词汇，拿后者查前者必然得 `undefined`，免安装版会静默命名成
+// `…_undefined-portable.exe`（看着像个正常交付物，不会报错）。
+// 而 `process.arch` 的取值本身正是 Tauri 给安装包用的那一套，直接可用，无需过表。
+
 /**
  * 交付物的后缀（`.app` 是**目录**，同样按后缀认）。
  * 其余一律不是交付物，不收：`dmg/icon.icns` 与 `dmg/bundle_dmg.sh` 是 dmg 的制作素材、
@@ -129,7 +137,7 @@ function appBinaries() {
   if (!WITH_APP || !CARGO_BIN) return []
   const found = []
   const candidates = [
-    { dir: join(TARGET_ROOT, 'release'), arch: TRIPLE_ARCH[process.arch] },
+    { dir: join(TARGET_ROOT, 'release'), arch: process.arch },
     ...readdirSync(TARGET_ROOT, { withFileTypes: true })
       .filter((e) => e.isDirectory() && e.name !== 'release')
       .map((e) => ({
@@ -139,7 +147,16 @@ function appBinaries() {
   ]
   for (const { dir, arch } of candidates) {
     const exe = join(dir, `${CARGO_BIN}.exe`)
-    if (existsSync(exe)) found.push({ path: exe, name: `${PRODUCT_NAME}_${VERSION}_${arch}-portable.exe` })
+    if (!existsSync(exe)) continue
+    // 兜底：架构串算不出来时名字会静默变成 `…_undefined-portable.exe`，看着像正常产物。
+    // 宁可当场失败，也不交出一个名字是错的交付物。
+    if (!arch) {
+      fail(
+        `${relative(process.cwd(), dir)} 的架构串算不出来，免安装版会命名成 ` +
+          `"${PRODUCT_NAME}_${VERSION}_undefined-portable.exe" —— 宁可不收`,
+      )
+    }
+    found.push({ path: exe, name: `${PRODUCT_NAME}_${VERSION}_${arch}-portable.exe` })
   }
   return found
 }
