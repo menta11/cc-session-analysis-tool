@@ -50,7 +50,7 @@ describe('buildFileMap', () => {
 
 describe('buildFileMap 真实传参形态（projectsRoot = 会话所在目录）', () => {
   const session = parseLines(lines, 'm')
-  // 与 electron/main/index.ts session:load 的缓存形态一致：
+  // 与迁移前 Electron 主进程 session:load 的缓存形态一致（该壳已删除，此处保留其传参形态）：
   // mainFilePath = 绝对路径 <projects>/<cwd>/<id>.jsonl
   // projectsRoot = dirname(去掉 .jsonl 的会话目录) = <projects>/<cwd>
   const id = 'abc-123'

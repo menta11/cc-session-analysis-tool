@@ -68,6 +68,17 @@ export function extractStructuredResult(toolName: string, tur: unknown): Structu
         description: strOrNull(o, 'description'),
         resolvedModel: strOrNull(o, 'resolvedModel'),
       }
+    // 这次回执只说「已在后台启动」；真实耗时与结果在 <sessionDir>/workflows/<runId>.json 里，
+    // 由 `core/discovery/linkWorkflows.ts` 补上（runId 是唯一的钥匙）。
+    case 'Workflow':
+      return {
+        toolName: 'Workflow',
+        runId: strOrNull(o, 'runId'),
+        taskId: strOrNull(o, 'taskId'),
+        workflowName: strOrNull(o, 'workflowName'),
+        scriptPath: strOrNull(o, 'scriptPath'),
+        status: strOrNull(o, 'status'),
+      }
     default:
       return null
   }

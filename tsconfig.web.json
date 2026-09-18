@@ -3,7 +3,8 @@
   "compilerOptions": {
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
-    "types": ["node"]
+    "types": []
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "core/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "core/**/*.ts"],
+  "exclude": ["core/fsBridgeNode.ts", "core/procBridgeNode.ts"]
 }

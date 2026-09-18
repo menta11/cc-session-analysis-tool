@@ -1,4 +1,15 @@
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+/**
+ * `claude` CLI 调用 —— 从 迁移前 Electron 壳的 `claudeCli.ts`（已删除） 迁到 `core/`，此后由 Tauri 渲染层独占使用。
+ *
+ * 迁移原则（同 `core/fsBridge.ts`）：**只把子进程 IO 换成 `ProcBridge`，业务逻辑逐字保留**。
+ * 于是 stream-json 逐行解析、stdin 组装、能力探测判据、以及「delta 与整消息二选一避免重复」
+ * 的策略都留在 TS —— 它们有 9 条测试。
+ *
+ * 唯一形状变化：`resolveClaudePath` / `claudeCapabilities` 由同步变异步（Tauri 只有异步 IPC）。
+ * 它们本来就在 `runClaudeStream` 的 async 路径上且带缓存，所以调用方无感；缓存改成缓存
+ * **Promise** 而不是值，顺带把并发首调去重了。
+ */
+import { procBridge } from '../procBridge'
 
 export interface ClaudeResult {
   ok: boolean
@@ -93,21 +104,22 @@ export function parseStreamJsonLine(line: string): ParsedStreamEvent {
   return { type: 'other' }
 }
 
-// ──────────────────────── claude 路径/能力探测（缓存） ────────────────────────
+// ──────────────────────── claude 路径/能力探测（缓存 Promise） ────────────────────────
 
-let cachedPath: string | null | undefined
+let pathPromise: Promise<string | null> | undefined
+
 /** 解析 claude 可执行路径（Windows: where; Unix: which）。缓存。 */
-export function resolveClaudePath(): string | null {
-  if (cachedPath !== undefined) return cachedPath
-  const cmd = process.platform === 'win32' ? 'where' : 'which'
-  try {
-    const r = spawnSync(cmd, ['claude'], { shell: true, encoding: 'utf8', windowsHide: true })
-    const out = (r.stdout || '') + (r.stderr || '')
-    cachedPath = out.split(/\r?\n/).map((x) => x.trim()).find(Boolean) ?? null
-  } catch {
-    cachedPath = null
-  }
-  return cachedPath
+export function resolveClaudePath(): Promise<string | null> {
+  pathPromise ??= (async () => {
+    const cmd = procBridge().platform === 'win32' ? 'where' : 'which'
+    try {
+      const r = await procBridge().execText(cmd, ['claude'])
+      return r.out.split(/\r?\n/).map((x) => x.trim()).find(Boolean) ?? null
+    } catch {
+      return null
+    }
+  })()
+  return pathPromise
 }
 
 export interface ClaudeCaps {
@@ -116,99 +128,25 @@ export interface ClaudeCaps {
   /** 支持 --include-partial-messages（增量 delta，真流式）。 */
   partial: boolean
 }
-let cachedCaps: ClaudeCaps | undefined
+
+let capsPromise: Promise<ClaudeCaps> | undefined
+
 /** 探测 claude 能力（--help 一次，缓存）。 */
-export function claudeCapabilities(): ClaudeCaps {
-  if (cachedCaps) return cachedCaps
-  const p = resolveClaudePath()
-  if (!p) {
-    cachedCaps = { streamJson: false, partial: false }
-    return cachedCaps
-  }
-  try {
-    const r = spawnSync(p, ['--help'], { shell: true, encoding: 'utf8', windowsHide: true })
-    const help = (r.stdout || '') + (r.stderr || '')
-    cachedCaps = { streamJson: help.includes('stream-json'), partial: help.includes('include-partial-messages') }
-  } catch {
-    cachedCaps = { streamJson: false, partial: false }
-  }
-  return cachedCaps
-}
-
-// ──────────────────────── 内部：通用进程运行（按行 stdout） ────────────────────────
-
-interface ProcessResult {
-  ok: boolean
-  text: string
-  error?: string
-  stderr: string
-}
-
-/** spawn claude，写 stdin，按行回调 stdout；处理超时/异常/退出码。 */
-function runProcess(
-  args: string[],
-  stdinText: string,
-  onLine: (line: string) => void,
-  opts: { timeoutMs?: number } = {},
-): Promise<ProcessResult> {
-  return new Promise((resolve) => {
-    let child: ChildProcess
+export function claudeCapabilities(): Promise<ClaudeCaps> {
+  capsPromise ??= (async () => {
+    const p = await resolveClaudePath()
+    if (!p) return { streamJson: false, partial: false }
     try {
-      child = spawn('claude', args, { shell: true, windowsHide: true })
-    } catch (e) {
-      resolve({ ok: false, text: '', error: '无法启动 claude：' + errMsg(e), stderr: '' })
-      return
-    }
-    const stdin = child.stdin
-    const stdout = child.stdout
-    const stderr = child.stderr
-    if (!stdin || !stdout || !stderr) {
-      resolve({ ok: false, text: '', error: 'claude 进程 stdio 不可用', stderr: '' })
-      return
-    }
-    let stdoutText = ''
-    let stderrText = ''
-    let lineBuf = ''
-    const handleChunk = (d: Buffer): void => {
-      const chunk = d.toString()
-      stdoutText += chunk
-      lineBuf += chunk
-      const lines = lineBuf.split(/\r?\n/)
-      lineBuf = lines.pop() ?? ''
-      for (const ln of lines) onLine(ln)
-    }
-    stdin.on('error', () => {
-      /* broken pipe 忽略 */
-    })
-    stdin.write(stdinText, 'utf8')
-    stdin.end()
-    stdout.on('data', handleChunk)
-    stderr.on('data', (d: Buffer) => {
-      stderrText += d.toString()
-    })
-    const timer = setTimeout(() => {
-      try {
-        child.kill()
-      } catch {
-        // ignore
+      const r = await procBridge().execText(p, ['--help'])
+      return {
+        streamJson: r.out.includes('stream-json'),
+        partial: r.out.includes('include-partial-messages'),
       }
-      resolve({ ok: false, text: stdoutText, error: '调用 claude 超时', stderr: stderrText })
-    }, opts.timeoutMs ?? 180_000)
-    child.on('error', (e: Error) => {
-      clearTimeout(timer)
-      resolve({ ok: false, text: '', error: 'claude CLI 未安装或调用失败：' + e.message, stderr: stderrText })
-    })
-    child.on('close', (code: number | null) => {
-      clearTimeout(timer)
-      if (lineBuf) onLine(lineBuf) // flush 末行
-      if (code === 0) resolve({ ok: true, text: stdoutText, error: undefined, stderr: stderrText })
-      else resolve({ ok: false, text: stdoutText, error: `claude 退出码 ${code}${stderrText ? '：' + stderrText.slice(0, 300) : ''}`, stderr: stderrText })
-    })
-  })
-}
-
-function errMsg(e: unknown): string {
-  return e instanceof Error ? e.message : String(e)
+    } catch {
+      return { streamJson: false, partial: false }
+    }
+  })()
+  return capsPromise
 }
 
 // ──────────────────────── 对外 API ────────────────────────
@@ -227,7 +165,7 @@ export async function runClaudeStream(
   opts: { timeoutMs?: number } = {},
 ): Promise<ClaudeResult> {
   const stdin = buildStdin(systemPrompt, userMessage)
-  const caps = claudeCapabilities()
+  const caps = await claudeCapabilities()
   const useStream = caps.streamJson
   const usePartial = caps.streamJson && caps.partial
   const args = usePartial
@@ -241,7 +179,9 @@ export async function runClaudeStream(
   let numTurns: number | undefined
   let text = ''
   let gotDeltas = false
-  const res = await runProcess(
+  // label: 'claude' —— 保持迁移前的用户可见错误文案不变
+  const res = await procBridge().runLines(
+    'claude',
     args,
     stdin,
     (line) => {
@@ -267,7 +207,7 @@ export async function runClaudeStream(
         numTurns = ev.numTurns
       }
     },
-    opts,
+    { timeoutMs: opts.timeoutMs, label: 'claude' },
   )
   return {
     ok: res.ok,
@@ -279,4 +219,3 @@ export async function runClaudeStream(
     numTurns,
   }
 }
-

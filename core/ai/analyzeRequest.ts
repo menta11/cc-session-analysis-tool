@@ -1,8 +1,10 @@
 import type { Session, ToolCall } from '../parser/types'
 import { breakdownOf } from '../model/timeBreakdown'
 import { buildDigest, buildFileMap, type FileMeta } from './prompt'
-import { getSystemPrompt } from './template'
+import { getLogSystemPrompt, getSystemPrompt } from './template'
 import { clipSessionToWindow } from './sessionWindow'
+import { buildLogDigest, type LogScope } from './logDigest'
+import type { LogSummary } from '../view/logView'
 import type { ViewWindow } from '../view/window'
 
 export interface AnalyzeRequestOpts {
@@ -83,4 +85,38 @@ export function buildAnalyzeRequest(session: Session, opts: AnalyzeRequestOpts):
 
   const userMessage = `${digest}\n\n${fileMap}`
   return { systemPrompt: getSystemPrompt(), userMessage }
+}
+
+export interface LogAnalyzeOpts {
+  /**
+   * 会话本体。**只用来生成文件地图（取证线索）** —— 分析输入是 `scope` 那张筛选后的表，
+   * 不是整个会话。之所以还要它：报告里要能指着「这一条去哪个文件、grep 哪个 id」，而
+   * 记录 ID → 文件的对应关系在会话树与 agentIndex 里，记录表本身没有。
+   */
+  session: Session
+  scope: LogScope
+  /** 整会话五类分解（`logSummary`）。行内标注为整会话口径，与筛选后条数区分开。 */
+  summary: LogSummary
+  projectsRoot: string
+  mainFilePath: string
+  agentIndex: Map<string, string>
+  fileMeta?: (absPath: string) => FileMeta | null
+}
+
+/**
+ * 组装「日志视图筛选后记录表」的一次分析调用：systemPrompt 走 log-run 模板，
+ * userMessage = 记录表 digest + 整会话文件地图（取证）。
+ *
+ * 与 `buildAnalyzeRequest` 平级而不是它的一个 kind：两者的**输入根本不是同一种东西**
+ * （Session vs 记录表），硬塞进一个 kind 分支会让那个函数的参数形状变成两套语义的并集。
+ */
+export function buildLogAnalyzeRequest(opts: LogAnalyzeOpts): AnalyzeRequest {
+  const digest = buildLogDigest(opts.scope, opts.summary)
+  const fileMap = buildFileMap(opts.session, {
+    projectsRoot: opts.projectsRoot,
+    mainFilePath: opts.mainFilePath,
+    agentIndex: opts.agentIndex,
+    fileMeta: opts.fileMeta,
+  })
+  return { systemPrompt: getLogSystemPrompt(), userMessage: `${digest}\n\n${fileMap}` }
 }

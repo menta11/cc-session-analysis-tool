@@ -1,7 +1,12 @@
 import type { Session, ToolCall } from '../parser/types'
 
-/** 解析子 transcript 的策略（依赖注入，便于单测与未来的懒加载）。 */
-export type ParseChild = (path: string) => Session
+/**
+ * 解析子 transcript 的策略（依赖注入，便于单测与懒加载）。
+ *
+ * 允许返回 Promise：Tauri 渲染层没有同步 fs（只有异步 IPC），子 transcript 只能异步读。
+ * 同步实现（`parseJsonl`、测试里的假实现）照旧可用 —— `await` 对非 Promise 是恒等操作。
+ */
+export type ParseChild = (path: string) => Session | Promise<Session>
 
 /** 派发子 agent 的工具名（新版 Agent，旧版 Task）。 */
 const DISPATCH_TOOLS = new Set(['Agent', 'Task'])
@@ -21,11 +26,15 @@ export interface LinkResult {
  * 递归：解析到的子 session 自身的 Agent 调用会继续链接孙 agent（自动拾取嵌套子 agent）。
  * 用 agentId 缓存避免重复解析与循环。
  */
-export function linkSubagents(session: Session, index: Map<string, string>, parseChild: ParseChild): LinkResult {
+export async function linkSubagents(
+  session: Session,
+  index: Map<string, string>,
+  parseChild: ParseChild,
+): Promise<LinkResult> {
   const unresolved: ToolCall[] = []
   const cache = new Map<string, Session>()
 
-  const link = (s: Session): void => {
+  const link = async (s: Session): Promise<void> => {
     for (const turn of s.turns) {
       for (const tc of turn.toolCalls) {
         if (!DISPATCH_TOOLS.has(tc.name)) continue
@@ -38,20 +47,20 @@ export function linkSubagents(session: Session, index: Map<string, string>, pars
         let child = cache.get(agentId)
         if (!child) {
           try {
-            child = parseChild(childPath)
+            child = await parseChild(childPath)
           } catch {
             unresolved.push(tc)
             continue
           }
           cache.set(agentId, child)
-          link(child) // 递归到孙 agent
+          await link(child) // 递归到孙 agent
         }
         tc.childSession = child
       }
     }
   }
 
-  link(session)
+  await link(session)
   return { session, unresolved }
 }
 

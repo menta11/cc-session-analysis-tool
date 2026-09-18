@@ -57,6 +57,75 @@ describe('breakdownOf', () => {
   })
 })
 
+describe('workflow 的那一类（workflowMs）', () => {
+  // 一轮：0s 提问 → 1s 发起 workflow（0.337s 就返回）→ 20s~30s 主 agent 顺手跑了个 Bash
+  // → 120s 收尾。workflow 按 run 记录真跑了 90s（[1s, 91s]），横跨主线上那段 Bash。
+  const wfLines = [
+    '{"type":"user","uuid":"u1","timestamp":"2026-04-24T12:00:00.000Z","sessionId":"m","message":{"role":"user","content":"跑一遍评审"}}',
+    '{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-04-24T12:00:01.000Z","sessionId":"m","message":{"model":"x","role":"assistant","content":[{"type":"tool_use","id":"wf","name":"Workflow","input":{"scriptPath":"D:/wf/x.js"}}],"usage":{}}}',
+    '{"type":"user","uuid":"u2","parentUuid":"a1","timestamp":"2026-04-24T12:00:01.337Z","sessionId":"m","toolUseResult":{"status":"async_launched","taskId":"t","taskType":"local_workflow","workflowName":"parallel-review","runId":"wf_1"},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"wf","content":"Workflow launched in background."}]}}',
+    '{"type":"assistant","uuid":"a2","parentUuid":"u2","timestamp":"2026-04-24T12:00:20.000Z","sessionId":"m","message":{"model":"x","role":"assistant","content":[{"type":"tool_use","id":"b1","name":"Bash","input":{}}],"usage":{}}}',
+    '{"type":"user","uuid":"u3","parentUuid":"a2","timestamp":"2026-04-24T12:00:30.000Z","sessionId":"m","toolUseResult":{"stdout":"","stderr":"","interrupted":false},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"b1","content":"x"}]}}',
+    '{"type":"assistant","uuid":"a3","parentUuid":"u3","timestamp":"2026-04-24T12:02:00.000Z","sessionId":"m","message":{"model":"x","role":"assistant","content":[{"type":"text","text":"收尾"}],"usage":{}}}',
+  ]
+
+  /** 给那条 Workflow 调用挂上 run 记录（真链接见 test/linkWorkflows.test.ts） */
+  const withRun = (durationMs: number | null): ReturnType<typeof parseLines> => {
+    const s = parseLines(wfLines, 'm')
+    const tc = s.turns.flatMap((t) => t.toolCalls).find((c) => c.name === 'Workflow')!
+    if (durationMs !== null) {
+      tc.workflowRun = {
+        runId: 'wf_1',
+        workflowName: 'parallel-review',
+        summary: '',
+        status: 'completed',
+        startTs: Date.parse('2026-04-24T12:00:01.000Z'),
+        durationMs,
+        agentCount: 3,
+        totalTokens: null,
+        totalToolCalls: null,
+        phases: [],
+        resultText: '',
+        resultTruncated: false,
+        logs: [],
+      }
+    }
+    return s
+  }
+
+  it('用 run 记录的真实区间，不用调用自己那 337ms', () => {
+    const b = breakdownOf(withRun(90_000))
+    expect(b.workflowMs).toBe(90_000) // [1s, 91s]
+    expect(b.directMs).toBe(10_000) // 主线那个 Bash [20s, 30s]
+    expect(b.localToolMs).toBe(90_000) // Bash 落在 workflow 区间里 → 并集还是 90s
+    expect(b.wallMs).toBe(120_000)
+    // 等式没破：总耗时 = 等用户 + 本地工具 + 模型思考（新类别进了 localTool，不是另起一摊）
+    expect(b.waitUserMs + b.localToolMs + b.computeMs).toBe(b.wallMs)
+    expect(b.computeMs).toBe(30_000)
+  })
+
+  it('workflow 与直接工具可以重叠（后台在跑、主 agent 照常干活），逐项相加会超过并集', () => {
+    const b = breakdownOf(withRun(90_000))
+    expect(b.directMs + b.workflowMs).toBeGreaterThan(b.localToolMs) // 重叠那 10s 只算一次
+  })
+
+  it('没有 run 记录 → 退回发起那一段，不拿「发起→返回」冒充运行时长', () => {
+    const b = breakdownOf(withRun(null))
+    expect(b.workflowMs).toBe(337) // [1s, 1.337s]：调用自己那个长度
+    expect(b.localToolMs).toBe(10_337) // 与 [20s,30s] 的 Bash 并集
+  })
+
+  it('甘特区间：workflow 那一段单独成类，不与 direct 混在一起', () => {
+    const ci = sessionIntervals(withRun(90_000))
+    expect(ci.workflow).toEqual([
+      { start: Date.parse('2026-04-24T12:00:01.000Z'), end: Date.parse('2026-04-24T12:01:31.000Z') },
+    ])
+    expect(ci.direct).toEqual([
+      { start: Date.parse('2026-04-24T12:00:20.000Z'), end: Date.parse('2026-04-24T12:00:30.000Z') },
+    ])
+  })
+})
+
 describe('sessionIntervals + complement（甘特数据）', () => {
   const BASE = Date.parse('2026-04-24T12:00:00.000Z')
 

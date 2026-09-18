@@ -58,6 +58,46 @@ export function zoomWindow(
   return { start, end }
 }
 
+/**
+ * 拖动窗口的某一端：只动被拖的那一端，另一端**锚定不动**。
+ *
+ * 为什么不能整体 clamp：整窗 clamp 会在拖左端撞到范围时把右端也一起往里推，
+ * 而用户只抓着一个手柄 —— 另一端跟着动会让人以为拖错了对象。
+ *
+ * `minMs` 是**两个手柄之间的几何下限**（不能叠在一起），调用方按自己的场景给：
+ * 统计视图给「窗口小到比例没意义」的下限，逐条视图给「1 像素对应的时长」。
+ */
+export function dragWindowEdge(
+  w: ViewWindow,
+  which: 'start' | 'end',
+  ts: number,
+  bounds: ViewWindow,
+  minMs: number,
+): ViewWindow {
+  const min = Math.max(1, minMs)
+  if (which === 'start') {
+    const start = Math.min(ts, w.end - min)
+    return { start: Math.max(bounds.start, start), end: w.end }
+  }
+  const end = Math.max(ts, w.start + min)
+  return { start: w.start, end: Math.min(bounds.end, end) }
+}
+
+/**
+ * 以某个时刻为中心的一段窗口（双击选段用），夹到 `bounds` 里。
+ *
+ * 贴着两头时**只收不缩**（各自夹自己的那一端）：宁可窄一点，也不要把中心那个时刻挤出窗口 ——
+ * 双击的落点是用户指着的东西，它必须留在结果里。窗口比 `bounds` 还宽时结果就是 `bounds`。
+ * 退化（宽 ≤ 0 或没有交集）返回 null，由调用方决定怎么办。
+ */
+export function windowAround(ts: number, width: number, bounds: ViewWindow): ViewWindow | null {
+  if (!(width > 0) || bounds.end <= bounds.start) return null
+  const half = width / 2
+  const start = Math.max(bounds.start, ts - half)
+  const end = Math.min(bounds.end, ts + half)
+  return end > start ? { start, end } : null
+}
+
 /** 把时间戳吸附到最近的边界（段边界或 turn 边界），无边界时原样返回。 */
 export function snapToSegmentBoundary(ts: number, boundaries: number[]): number {
   if (boundaries.length === 0) return ts

@@ -34,6 +34,17 @@ export function usageFromDict(d: unknown): Usage {
   }
 }
 
+/**
+ * 记录里带的 usage → token 账；记录**没带** usage（或只带了个空对象）→ `null`。
+ *
+ * 与 `usageFromDict` 分开是为了合并同一条消息的多条记录时，不拿一条没带 usage 的记录把已经读到的账抹成 0
+ * （同一条消息是边写边落的好几条记录，见 `parse.ts` 里「token 账取最后一条带 usage 的」那段）。
+ */
+export function usageFromRecord(d: unknown): Usage | null {
+  if (!d || typeof d !== 'object') return null
+  return Object.keys(d as Obj).length === 0 ? null : usageFromDict(d)
+}
+
 export function parseContentBlocks(content: unknown): ContentBlock[] {
   if (!Array.isArray(content)) return []
   const out: ContentBlock[] = []

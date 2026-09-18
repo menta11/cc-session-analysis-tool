@@ -10,9 +10,10 @@ describe('classifyTool', () => {
     ['Grep', 'direct'],
     ['Glob', 'direct'],
     ['Write', 'direct'],
-    ['WebFetch', 'direct'], // 除 Agent/Task/AskUserQuestion 外都是 direct
+    ['WebFetch', 'direct'], // 除 Agent/Task/Workflow/AskUserQuestion 外都是 direct
     ['Agent', 'delegated'],
     ['Task', 'delegated'], // 旧版工具名
+    ['Workflow', 'workflow'], // 一次调用背后是一整套子 agent，不是本地工具
     ['AskUserQuestion', 'wait-user'],
   ])('classifies %s as %s', (name, kind) => {
     expect(classifyTool(name)).toBe(kind)

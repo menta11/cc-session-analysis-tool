@@ -22,7 +22,7 @@ const leaf = (id: string): Session =>
   )
 
 describe('linkSubagents', () => {
-  it('attaches a child session for an Agent call with a matching agentId', () => {
+  it('attaches a child session for an Agent call with a matching agentId', async () => {
     const index = new Map([['child1', '/fake/child1.jsonl']])
     const main = parseLines(
       [
@@ -35,12 +35,12 @@ describe('linkSubagents', () => {
     const child = leaf('child1')
     const parseChild = (p: string) => (p === '/fake/child1.jsonl' ? child : (() => { throw new Error('unknown') })())
 
-    const { session, unresolved } = linkSubagents(main, index, parseChild)
+    const { session, unresolved } = await linkSubagents(main, index, parseChild)
     expect(session.turns[0].toolCalls[0].childSession).toBe(child)
     expect(unresolved).toHaveLength(0)
   })
 
-  it('recurses: a child’s own Agent call links to a grandchild', () => {
+  it('recurses: a child\u2019s own Agent call links to a grandchild', async () => {
     const index = new Map([
       ['child1', '/fake/child1.jsonl'],
       ['grand1', '/fake/grand1.jsonl'],
@@ -69,14 +69,14 @@ describe('linkSubagents', () => {
       throw new Error('unknown')
     }
 
-    const { session } = linkSubagents(main, index, parseChild)
+    const { session } = await linkSubagents(main, index, parseChild)
     const child = session.turns[0].toolCalls[0].childSession!
     const grand = child.turns[0].toolCalls[0].childSession
     expect(child).toBe(child1)
     expect(grand).toBe(grand1)
   })
 
-  it('falls back to tool_result text regex for async agents without structuredResult.agentId', () => {
+  it('falls back to tool_result text regex for async agents without structuredResult.agentId', async () => {
     const index = new Map([['async1', '/fake/async1.jsonl']])
     const main = parseLines(
       [
@@ -90,12 +90,12 @@ describe('linkSubagents', () => {
     const asyncChild = leaf('async1')
     const parseChild = (p: string) => (p === '/fake/async1.jsonl' ? asyncChild : (() => { throw new Error('unknown') })())
 
-    const { session, unresolved } = linkSubagents(main, index, parseChild)
+    const { session, unresolved } = await linkSubagents(main, index, parseChild)
     expect(session.turns[0].toolCalls[0].childSession).toBe(asyncChild)
     expect(unresolved).toHaveLength(0)
   })
 
-  it('records unresolved Agent calls (no agentId, no regex hit)', () => {
+  it('records unresolved Agent calls (no agentId, no regex hit)', async () => {
     const index = new Map([['child1', '/fake/child1.jsonl']])
     const main = parseLines(
       [
@@ -105,7 +105,7 @@ describe('linkSubagents', () => {
       ],
       'm',
     )
-    const { session, unresolved } = linkSubagents(main, index, () => { throw new Error('should not be called') })
+    const { session, unresolved } = await linkSubagents(main, index, () => { throw new Error('should not be called') })
     expect(session.turns[0].toolCalls[0].childSession).toBeUndefined()
     expect(unresolved).toHaveLength(1)
   })

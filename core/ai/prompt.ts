@@ -1,4 +1,4 @@
-import type { Session, ToolCall, Turn } from '../parser/types'
+import type { NodeTime, Session, ToolCall, Turn } from '../parser/types'
 import { breakdownOf, sessionIntervals, type CategoryIntervals } from '../model/timeBreakdown'
 import { classifyTool } from '../model/classify'
 import { fmtMs, fmtTs, pct, bar } from '../view/format'
@@ -37,6 +37,7 @@ function fmtTokens(n: number | null | undefined): string {
   if (n == null) return ''
   return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n)
 }
+
 
 function countSubagents(session: Session): number {
   let n = 0
@@ -110,11 +111,12 @@ function timeBuckets(session: Session, ci: CategoryIntervals): Bucket[] {
     const hi = i === count - 1 ? end : Math.round(start + (i + 1) * segLen)
     const direct = clipToIntervals(ci.direct, lo, hi)
     const delegated = clipToIntervals(ci.delegated, lo, hi)
+    const workflow = clipToIntervals(ci.workflow, lo, hi)
     out.push({
       lo,
       hi,
       waitUser: unionDuration(clipToIntervals(ci.waitUser, lo, hi)),
-      localTool: unionDuration([...direct, ...delegated]),
+      localTool: unionDuration([...direct, ...delegated, ...workflow]),
       compute: unionDuration(clipToIntervals(ci.compute, lo, hi)),
       total: hi - lo,
     })
@@ -258,6 +260,25 @@ export function buildDiagnosticFacts(session: Session, opts: DigestOpts = {}): s
   return lines.join('\n')
 }
 
+// ────────────────────────── 分解概览（两份 digest 共用） ──────────────────────────
+
+/**
+ * 耗时分解的三行概览（等用户 / 本地工具 / 模型思考），**树视图 digest 与记录表 digest 唯一的那份**。
+ *
+ * 「本地工具」取 `localToolMs`（三类区间的**并集**）而不是 `directMs + delegatedMs + workflowMs`：
+ * workflow 在后台跑、主 agent 照常干活，同一种秒会被算两遍，相加出来的数可以大于总耗时 ——
+ * 那时 `wallMs = 等用户 + 本地工具 + compute` 这条代数就破了，两份报告会各说一套。
+ * 三个分项只作括号里的明细，不参与任何计算。
+ */
+export function breakdownLines(b: NodeTime, width = 10): string[] {
+  const pp = (x: number): string => `${pct(x, b.wallMs)}%`
+  return [
+    `- 等用户 ${fmtMs(b.waitUserMs)} (${pp(b.waitUserMs)}) ${bar(b.waitUserMs, b.wallMs, width)}`,
+    `- 本地工具 ${fmtMs(b.localToolMs)} (${pp(b.localToolMs)}) ${bar(b.localToolMs, b.wallMs, width)} — 直接 ${fmtMs(b.directMs)} / 委派子agent ${fmtMs(b.delegatedMs)} / workflow ${fmtMs(b.workflowMs)}`,
+    `- 模型思考 ${fmtMs(b.computeMs)} (${pp(b.computeMs)}) ${bar(b.computeMs, b.wallMs, width)}`,
+  ]
+}
+
 // ────────────────────────── 厚摘要（统一，对任意 Session） ──────────────────────────
 
 /** 把 agent 运行耗时分解格式化为 markdown 摘要（喂给 claude 分析用）。 */
@@ -267,7 +288,6 @@ export function buildDigest(session: Session, opts: DigestOpts = {}): string {
   const all = session.turns.flatMap((t) => t.toolCalls)
   const direct = all.filter((tc) => classifyTool(tc.name) === 'direct')
   const agents = all.filter((tc) => classifyTool(tc.name) === 'delegated')
-  const pp = (x: number): string => `${pct(x, b.wallMs)}%`
 
   const lines: string[] = []
   lines.push('# Agent 运行耗时摘要')
@@ -277,11 +297,7 @@ export function buildDigest(session: Session, opts: DigestOpts = {}): string {
   if (opts.parentWallMs != null && opts.parentWallMs > 0) {
     lines.push(`- 占父总耗时 ${pct(b.wallMs, opts.parentWallMs)}% ${bar(b.wallMs, opts.parentWallMs, 10)}`)
   }
-  lines.push(`- 等用户 ${fmtMs(b.waitUserMs)} (${pp(b.waitUserMs)}) ${bar(b.waitUserMs, b.wallMs, 10)}`)
-  lines.push(
-    `- 本地工具 ${fmtMs(b.localToolMs)} (${pp(b.localToolMs)}) ${bar(b.localToolMs, b.wallMs, 10)} — 直接 ${fmtMs(b.directMs)} / 委派子agent ${fmtMs(b.delegatedMs)}`,
-  )
-  lines.push(`- 模型思考 ${fmtMs(b.computeMs)} (${pp(b.computeMs)}) ${bar(b.computeMs, b.wallMs, 10)}`)
+  lines.push(...breakdownLines(b))
   lines.push('')
 
   // 时序分桶（阶段底料）
@@ -315,7 +331,7 @@ export function buildDigest(session: Session, opts: DigestOpts = {}): string {
     const byName = new Map<string, number>()
     for (const tc of errCalls) byName.set(tc.name, (byName.get(tc.name) ?? 0) + 1)
     lines.push('## 错误汇总')
-    lines.push(`- 错误调用 ${errCalls.length} 次 / 错误耗时 ${fmtMs(errMs)} (${pp(errMs)})`)
+    lines.push(`- 错误调用 ${errCalls.length} 次 / 错误耗时 ${fmtMs(errMs)} (${pct(errMs, b.wallMs)}%)`)
     lines.push(`- 按工具: ${[...byName.entries()].map(([n, c]) => `${n} ×${c}`).join(' / ') || '无'}`)
     const failedAgents = agents
       .filter((tc) => tc.isError)
@@ -367,6 +383,16 @@ export function buildDigest(session: Session, opts: DigestOpts = {}): string {
     lines.push('')
   }
 
+  // workflow 全量表：一次调用跑一整套子 agent，耗时只有 run 记录说得出来（见 WorkflowRun）
+  const workflows = all.filter((tc) => classifyTool(tc.name) === 'workflow')
+  if (workflows.length) {
+    lines.push('## workflow 全量表（按耗时降序）')
+    for (const tc of [...workflows].sort((a, b2) => (b2.workflowRun?.durationMs ?? 0) - (a.workflowRun?.durationMs ?? 0))) {
+      lines.push(workflowRow(tc, b.wallMs))
+    }
+    lines.push('')
+  }
+
   // 并行度
   if (ci.delegated.length) {
     const pk = peakParallel(ci.delegated)
@@ -389,6 +415,21 @@ function subagentRow(tc: ToolCall, parentWall: number): string {
   const tok = fmtTokens(sr?.totalTokens)
   const fail = tc.isError ? ' ✗' : ''
   return `- ${sr?.agentType ?? 'agent'} "${(sr?.description ?? summarizeInput(tc)) || ''}" ${fmtMs(wall)}${pctStr}${barStr}${fail}${tok ? ` tok=${tok}` : ''} agentId=${sr?.agentId ?? tc.toolUseId}`
+}
+
+/**
+ * 一行 workflow：名字 + 真实运行时长 + 子 agent 个数 + 状态。
+ *
+ * 时长取 run 记录，不取调用自己的 `durationMs` —— 后者是异步发起的几百毫秒（见 `WorkflowRun`）。
+ * 没有 run 记录时明说，免得读的人把它那个「几百毫秒」当真。
+ */
+function workflowRow(tc: ToolCall, parentWall: number): string {
+  const run = tc.workflowRun
+  if (!run) return `- Workflow "${summarizeInput(tc) || '(无输入)'}" 运行记录缺失（耗时不详）`
+  const pctStr = parentWall > 0 ? ` (${Math.round((run.durationMs / parentWall) * 100)}%)` : ''
+  const barStr = parentWall > 0 ? ` ${bar(run.durationMs, parentWall, 10)}` : ''
+  const tok = fmtTokens(run.totalTokens)
+  return `- ${run.workflowName || 'workflow'} ${fmtMs(run.durationMs)}${pctStr}${barStr} · ${run.agentCount} 个子agent · ${run.status || '状态未知'}${tok ? ` tok=${tok}` : ''} runId=${run.runId}`
 }
 
 // ────────────────────────── 文件地图（标注排序 + 取证入口） ──────────────────────────

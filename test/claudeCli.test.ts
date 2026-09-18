@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildStdin, parseStreamJsonLine } from '../electron/main/claudeCli'
+import { buildStdin, parseStreamJsonLine } from '../core/ai/claudeCli'
 
 describe('buildStdin', () => {
   it('systemPrompt inline 为前缀 + 分隔 + 待分析数据 + userMessage', () => {

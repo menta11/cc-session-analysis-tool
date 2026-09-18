@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { parseLines } from '../core/parser/parse'
-import { buildTreeNode, clipTreeToWindow } from '../core/view/treeView'
+import { buildTreeNode, clipTreeToWindow, findToolPath } from '../core/view/treeView'
 
 const lines = [
   '{"type":"user","uuid":"u1","timestamp":"2026-04-24T12:00:00.000Z","sessionId":"m","cwd":"/home/me/proj","message":{"role":"user","content":"go"}}',
@@ -54,6 +54,77 @@ describe('buildTreeNode', () => {
     expect(agent.expandable).toBe(true)
     expect(agent.childSession).toBeDefined()
     expect(agent.label).toContain('general-purpose')
+  })
+
+  it('workflow 自成一支：一次调用一个节点，它下面是这一跑的子 agent（各自可展开）', () => {
+    const wfLines = [
+      '{"type":"user","uuid":"u1","timestamp":"2026-04-24T12:00:00.000Z","sessionId":"m","message":{"role":"user","content":"评审"}}',
+      '{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-04-24T12:00:01.000Z","sessionId":"m","message":{"model":"x","role":"assistant","content":[{"type":"tool_use","id":"wf","name":"Workflow","input":{"scriptPath":"D:/wf/x.js"}}],"usage":{}}}',
+      '{"type":"user","uuid":"u2","parentUuid":"a1","timestamp":"2026-04-24T12:00:01.337Z","sessionId":"m","toolUseResult":{"status":"async_launched","taskId":"t","taskType":"local_workflow","workflowName":"parallel-review","runId":"wf_1"},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"wf","content":"launched"}]}}',
+      '{"type":"assistant","uuid":"a3","parentUuid":"u2","timestamp":"2026-04-24T12:01:40.000Z","sessionId":"m","message":{"model":"x","role":"assistant","content":[{"type":"text","text":"收尾"}],"usage":{}}}',
+    ]
+    const s = parseLines(wfLines, 'm')
+    const tc = s.turns.flatMap((t) => t.toolCalls).find((c) => c.name === 'Workflow')!
+    tc.workflowRun = {
+      runId: 'wf_1',
+      workflowName: 'parallel-review',
+      summary: '',
+      status: 'completed',
+      startTs: Date.parse('2026-04-24T12:00:01.000Z'),
+      durationMs: 90_000,
+      agentCount: 2,
+      totalTokens: null,
+      totalToolCalls: null,
+      phases: [],
+      resultText: '',
+      resultTruncated: false,
+      logs: [],
+    }
+    const child = (id: string, prompt: string): ReturnType<typeof parseLines> =>
+      parseLines(
+        [
+          `{"type":"user","uuid":"${id}u","timestamp":"2026-04-24T12:00:02.000Z","sessionId":"${id}","isSidechain":true,"message":{"role":"user","content":"${prompt}"}}`,
+          `{"type":"assistant","uuid":"${id}a","parentUuid":"${id}u","timestamp":"2026-04-24T12:00:40.000Z","sessionId":"${id}","isSidechain":true,"message":{"model":"x","role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{}}}`,
+        ],
+        id,
+      )
+    tc.childSessions = [child('c1', '你是准确性与一致性专家'), child('c2', '你是边界条件专家')]
+
+    const tree = buildTreeNode(s)
+    const local = tree.children!.find((c) => c.kind === 'localTool')!
+    const wfBucket = local.children!.find((c) => c.kind === 'workflow')!
+    expect(wfBucket.label).toBe('workflow')
+    expect(wfBucket.ms).toBe(90_000) // run 记录的真实时长，不是调用自己那 337ms
+    expect(wfBucket.count).toBe(1)
+    expect(wfBucket.segments).toEqual([
+      { start: Date.parse('2026-04-24T12:00:01.000Z'), end: Date.parse('2026-04-24T12:01:31.000Z'), color: 'var(--cat-workflow)' },
+    ])
+
+    const run = wfBucket.children![0]
+    expect(run.kind).toBe('workflow')
+    expect(run.label).toBe('parallel-review · 2 个子 agent')
+    expect(run.ms).toBe(90_000)
+    expect(run.call?.toolUseId).toBe('wf')
+    // 子 agent 是这一跑的 children（不是 childSession：一次调用背后是一整套）
+    expect(run.children!.map((c) => c.kind)).toEqual(['agent', 'agent'])
+    expect(run.children![0].label).toBe('#1 你是准确性与一致性专家')
+    expect(run.children![0].expandable).toBe(true)
+    expect(run.children![0].childSession?.sessionId).toBe('c1')
+    expect(run.children![0].ms).toBe(38_000) // 该子 agent 自己的时间跨度
+  })
+
+  it('没有 run 记录时标签明说状态未知之外的实情（用回执里的名字，不编）', () => {
+    const noRun = [
+      '{"type":"user","uuid":"u1","timestamp":"2026-04-24T12:00:00.000Z","sessionId":"m","message":{"role":"user","content":"评审"}}',
+      '{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2026-04-24T12:00:01.000Z","sessionId":"m","message":{"model":"x","role":"assistant","content":[{"type":"tool_use","id":"wf","name":"Workflow","input":{"scriptPath":"D:/wf/x.js"}}],"usage":{}}}',
+      '{"type":"user","uuid":"u2","parentUuid":"a1","timestamp":"2026-04-24T12:00:01.337Z","sessionId":"m","toolUseResult":{"status":"async_launched","workflowName":"parallel-review"},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"wf","content":"launched"}]}}',
+    ]
+    const tree = buildTreeNode(parseLines(noRun, 'm'))
+    const wfBucket = tree.children!.find((c) => c.kind === 'localTool')!.children!.find((c) => c.kind === 'workflow')!
+    const run = wfBucket.children![0]
+    expect(run.label).toBe('parallel-review')
+    expect(run.ms).toBe(337) // 退回发起那一段
+    expect(run.children).toEqual([])
   })
 })
 
@@ -126,5 +197,44 @@ describe('clipTreeToWindow', () => {
     // delegated agent 段（11s-111s）在窗口内 → count 保持
     const delegated = local.children!.find((c) => c.kind === 'delegated')!
     expect(delegated.count).toBe(1)
+  })
+})
+
+describe('findToolPath（日志视图「在树视图定位」用）', () => {
+  it('直接工具：定位到它所在的桶，路径 = 逐层下标', () => {
+    const s = parseLines(lines, 'm')
+    const tree = buildTreeNode(s)
+    // root.children = [waitUser, localTool, compute] → localTool.children = [direct, delegated]
+    // → direct.children = [bucket-Bash]
+    expect(findToolPath(tree, 't1')).toEqual({ node: expect.objectContaining({ id: 'bucket-Bash' }), path: [1, 0, 0] })
+  })
+
+  it('委派调用：定位到 agent 节点', () => {
+    const s = parseLines(lines, 'm')
+    const hit = findToolPath(buildTreeNode(s), 't2')
+    expect(hit?.node.kind).toBe('agent')
+    expect(hit?.path).toEqual([1, 1, 0])
+  })
+
+  it('子 agent 内部的工具：定位进子会话的树，路径接在 agent 节点之后', () => {
+    const s = parseLines(lines, 'm')
+    const child = parseLines(
+      [
+        '{"type":"user","uuid":"cu1","timestamp":"2026-04-24T12:00:11.000Z","sessionId":"child","message":{"role":"user","content":"sub"}}',
+        '{"type":"assistant","uuid":"ca1","parentUuid":"cu1","timestamp":"2026-04-24T12:00:12.000Z","sessionId":"child","message":{"model":"x","role":"assistant","content":[{"type":"tool_use","id":"ct1","name":"Grep","input":{"pattern":"x"}}],"usage":{}}}',
+        '{"type":"user","uuid":"cu2","parentUuid":"ca1","timestamp":"2026-04-24T12:00:13.000Z","sessionId":"child","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"ct1","content":"o"}]}}',
+      ],
+      'child',
+    )
+    s.turns[0].toolCalls[1].childSession = child
+    const hit = findToolPath(buildTreeNode(s), 'ct1')
+    expect(hit?.node.id).toBe('bucket-other')
+    // [localTool, delegated, agent-0] + 子会话内 [localTool, direct, bucket-other]
+    expect(hit?.path).toEqual([1, 1, 0, 1, 0, 0])
+  })
+
+  it('找不到就返回 null（调用方据此不切视图）', () => {
+    const s = parseLines(lines, 'm')
+    expect(findToolPath(buildTreeNode(s), '不存在的 id')).toBeNull()
   })
 })
