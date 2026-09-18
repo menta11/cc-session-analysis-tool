@@ -116,6 +116,20 @@ export async function openTerminal(id: string): Promise<{ ok: boolean; error?: s
 }
 
 /**
+ * 交给原生 Windows 程序的路径必须用反斜杠。
+ *
+ * `core/paths.ts::joinPath` 一律用 `/` —— 那对 Node/Rust 的 fs API、macOS 的 `open`、
+ * Linux 的 `xdg-open` 都合法，唯独 `explorer.exe` 不认：给它一个带 `/` 的路径，它
+ * **不报错、不返回非 0**，而是静默去开自己的默认文件夹（本机实测 = `C:\Users\<user>\Documents`）。
+ * 于是起进程成功 → `ok:true` → 界面无红字，整条链路都以为成功了，没有任何一层能发现。
+ *
+ * 只换分隔符，不动别的字符：路径仍作为**单个 argv** 传（不经 shell），含空格/引号的目录名依旧安全。
+ */
+function toNativeWin32Path(p: string): string {
+  return p.replace(/\//g, '\\')
+}
+
+/**
  * 在系统文件管理器里打开一个目录：Finder / 资源管理器 / 桌面环境的 xdg-open。
  *
  * 路径直接作为参数传（不经 shell），所以不用转义 —— 含空格、引号的目录名都安全。
@@ -123,7 +137,8 @@ export async function openTerminal(id: string): Promise<{ ok: boolean; error?: s
  */
 export function buildRevealCommand(dir: string, platform: string): SpawnCommand {
   const exe = platform === 'win32' ? 'explorer' : platform === 'linux' ? 'xdg-open' : 'open'
-  return { exe, args: [dir], opts: DETACHED_OPTS }
+  const arg = platform === 'win32' ? toNativeWin32Path(dir) : dir
+  return { exe, args: [arg], opts: DETACHED_OPTS }
 }
 
 /**

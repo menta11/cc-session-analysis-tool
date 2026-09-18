@@ -200,11 +200,14 @@ export function AnalyzerPage({ onCopy }: { onCopy: (text: string, tip: string) =
   /**
    * 在系统文件管理器里打开该会话 jsonl 所在的目录（`~/.claude/projects/<project>/`）——
    * 不是会话里那个 cwd（那是被分析的项目），是这份 transcript 自己的落盘位置。
+   *
+   * 失败文案带上「打开文件夹」这个动作：宿主那条错误是中性的（同一个原语也开终端），
+   * 光看「启动进程失败（explorer）」用户不知道自己点的那一下要干什么。
    */
   const openSessionDir = useCallback(async (): Promise<void> => {
     if (!selectedPath) return
     const res = await api.openDir(dirName(selectedPath))
-    setDirError(res.ok ? null : (res.error ?? '打开文件夹失败'))
+    setDirError(res.ok ? null : res.error ? `打开文件夹失败：${res.error}` : '打开文件夹失败')
   }, [selectedPath])
 
   /**
@@ -291,6 +294,8 @@ export function AnalyzerPage({ onCopy }: { onCopy: (text: string, tip: string) =
     // 换会话必须清掉时间选区：上一个会话的时刻落在这个会话里也「合法」，
     // 留着它会悄悄筛掉一堆行，而用户看着一个自己没拉过的选区无从解释
     setLogWindow(null)
+    // 同理清掉上一次「打开位置」的报错 —— 留着它，看起来像是新选的会话也失败了
+    setDirError(null)
     void api.loadSession(path).then((s) => {
       setSession(s)
       if (s.startedAt != null && s.endedAt != null) {

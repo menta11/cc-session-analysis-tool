@@ -27,9 +27,12 @@ pub async fn spawn_detached(exe: String, args: Vec<String>, cwd: String) -> Resu
     #[cfg(unix)]
     cmd.process_group(0);
 
+    // 文案必须中性：本原语由两个动作共用 —— 开终端续接（core/terminal.ts::openTerminal）
+    // 与在文件管理器里打开目录（::openDir）。写死「终端」会让「打开位置」失败时对用户胡说
+    // （他点的是文件夹，没碰过终端）。真正失败的原因通常与两者都无关：目录不存在、命令不在 PATH。
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("启动终端失败（{exe}）：{e}"))?;
+        .map_err(|e| format!("启动进程失败（{exe}）：{e}"))?;
 
     // 不 wait：立刻返回，用户已经在终端窗口里了。
     // 但仍要有人回收，否则终端退出后本进程会留一个僵尸 —— 交给后台任务。
@@ -122,6 +125,6 @@ mod tests {
         )
         .await
         .expect_err("不存在的命令应返回 Err");
-        assert!(err.contains("启动终端失败"), "实际: {err}");
+        assert!(err.contains("启动进程失败"), "实际: {err}");
     }
 }

@@ -144,16 +144,41 @@ describe('openTerminal（经 ProcBridge，两壳共用）', () => {
 
 describe('buildRevealCommand — 在文件管理器里打开目录', () => {
   const DIR = '/Users/me/.claude/projects/-Users-me-proj'
+  const WIN_DIR = String.raw`C:\Users\me\.claude\projects\D--proj`
 
   it('三平台各用各的系统命令', () => {
     expect(buildRevealCommand(DIR, 'darwin')).toMatchObject({ exe: 'open', args: [DIR] })
-    expect(buildRevealCommand(DIR, 'win32')).toMatchObject({ exe: 'explorer', args: [DIR] })
     expect(buildRevealCommand(DIR, 'linux')).toMatchObject({ exe: 'xdg-open', args: [DIR] })
+    expect(buildRevealCommand(WIN_DIR, 'win32')).toMatchObject({ exe: 'explorer', args: [WIN_DIR] })
+  })
+
+  // explorer 不认 `/`：给它一个带 `/` 的路径，它不报错、不返回非 0，而是静默去开默认文件夹
+  // （本机实测 = 「文档」）。链路其余各层都以为成功了 —— 所以只能在拼串这一步拦住。
+  it('win32：分隔符归一化成反斜杠', () => {
+    // 真实链路给的串：USERPROFILE 是反斜杠，之后 core/paths.ts::joinPath 一律用 `/`
+    const fromJoinPath = String.raw`C:\Users\me/.claude/projects/D--project-x`
+    expect(buildRevealCommand(fromJoinPath, 'win32').args).toEqual([
+      String.raw`C:\Users\me\.claude\projects\D--project-x`,
+    ])
+    // 全 `/` 的也要换
+    expect(buildRevealCommand('C:/Users/me/.claude/projects', 'win32').args).toEqual([
+      String.raw`C:\Users\me\.claude\projects`,
+    ])
+    // 已经是反斜杠的原样（幂等）
+    expect(buildRevealCommand(WIN_DIR, 'win32').args).toEqual([WIN_DIR])
+  })
+
+  it('POSIX 不动分隔符 —— open / xdg-open 认 `/`', () => {
+    expect(buildRevealCommand(DIR, 'darwin').args).toEqual([DIR])
+    expect(buildRevealCommand(DIR, 'linux').args).toEqual([DIR])
   })
 
   it('路径原样作为参数传给进程（不经 shell，含空格/引号也安全）', () => {
     const weird = '/Users/me/my "project" & co'
     expect(buildRevealCommand(weird, 'darwin').args).toEqual([weird])
+    // win32 只换分隔符，其余字符一个不动（尤其引号与空格不得被引号包裹或转义）
+    const winWeird = String.raw`C:\Users\me\my "project" & co`
+    expect(buildRevealCommand(winWeird, 'win32').args).toEqual([winWeird])
   })
 
   it('三平台都是 detached + stdio=ignore（关 app 不关掉用户的文件管理器窗口）', () => {
