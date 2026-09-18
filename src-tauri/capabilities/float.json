@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "float",
+  "description": "悬浮窗（远程 mini.html）的窗口控制能力：只放行 origin 为 http://127.0.0.1:<任意端口> 的页面，且只放行 ccMonitor 的 5 个桥命令。",
+  "windows": ["float"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*/*"]
+  },
+  "permissions": [
+    "float:allow-enter",
+    "float:allow-back-to-dashboard",
+    "float:allow-resize",
+    "float:allow-drag-start",
+    "float:allow-drag-move"
+  ]
+}

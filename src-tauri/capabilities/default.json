@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "主窗口默认能力。自定义 #[tauri::command]（应用命令）在本地 origin 下不需要在这里授权；插件/核心命令必须逐个列出。这里刻意不用 core:default / dialog:default：tauri.conf.json 开了 build.removeUnusedCommands，而它按本文件的允许集裁剪 core 插件命令，写 default 通配等于把几十条用不到的命令重新标成「已用」、白付裁剪。清单依据是构建产物里实际出现的四条 invoke —— plugin:event|listen、plugin:event|unlisten、plugin:dialog|save、plugin:float|enter（grep -rho 'plugin:[a-zA-Z_|]*' out/tauri-renderer/）。唯一的例外是 core:webview:allow-internal-toggle-devtools：它只服务 debug 构建里注入的 toggle-devtools.js（tauri 的 webview/plugin.rs 用 cfg(any(debug_assertions, feature = \"devtools\")) 把脚本与命令一起圈起来），漏掉它 Cmd+Alt+I 在 tauri dev 里会报 not found，release 则本就两者皆无。",
+  "windows": ["main"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:webview:allow-internal-toggle-devtools",
+    "dialog:allow-save",
+    "float:allow-enter"
+  ]
+}

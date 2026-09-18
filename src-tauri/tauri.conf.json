@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Claude会话耗时分析",
+  "version": "0.1.4",
+  "identifier": "com.menta11.ccsa",
+  "build": {
+    "frontendDist": "../out/tauri-renderer",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npx vite --config vite.tauri.config.ts",
+    "beforeBuildCommand": "npx vite build --config vite.tauri.config.ts",
+    "removeUnusedCommands": true
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Claude 会话耗时分析",
+        "width": 1400,
+        "height": 900,
+        "resizable": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$HOME/.claude/projects/**"
+        ]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "DeveloperTool",
+    "shortDescription": "Claude Code 会话耗时分析（Tauri v2 实现）",
+    "longDescription": "分析 Claude Code 会话日志，统计「等待用户 / 本地工具 / 模型计算」三段耗时，并内置实时监控代理。",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

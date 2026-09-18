@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { api } from '../api'
+import { probeMonitor } from './monitorProbe'
 
 const PROBE_ATTEMPTS = 3
 const PROBE_INTERVAL_MS = 800
@@ -11,18 +13,15 @@ type Theme = 'dark' | 'light'
  * 本页只负责: 拿端口、探测 proxy 存活 (失败给重试遮罩)、转发 dashboard 的
  * postMessage({type:'enter-float'}) 到主进程悬浮窗, 以及把宿主主题同步进
  * iframe (?theme= 首帧 + postMessage 实时切换, dashboard 是独立文档, 不继承 CSS 变量).
+ * 「拿端口 + 探测」每次现取端口, 收敛逻辑在 ./monitorProbe.ts (可单测).
  */
 export function MonitorPage({ theme }: { theme: Theme }): JSX.Element {
   const [port, setPort] = useState<number | null>(null)
   const [proxyDown, setProxyDown] = useState(false)
   const [probing, setProbing] = useState(true)
-  // 重试 = 重新探测 + 重载 iframe
+  // 重试 = 重新探测（含重新取端口）+ 重载 iframe
   const [reloadKey, setReloadKey] = useState(0)
   const iframeRef = useRef<HTMLIFrameElement>(null)
-
-  useEffect(() => {
-    void window.api.getMonitorPort().then((p) => setPort(p))
-  }, [])
 
   // 宿主主题切换 → 通知 dashboard (首帧已由 ?theme= 带入, 这里管实时切换)
   useEffect(() => {
@@ -37,33 +36,33 @@ export function MonitorPage({ theme }: { theme: Theme }): JSX.Element {
   useEffect(() => {
     const onMsg = (e: MessageEvent): void => {
       const data = e.data as { type?: string } | null
-      if (data?.type === 'enter-float') void window.api.enterFloatMode()
+      if (data?.type === 'enter-float') void api.enterFloatMode()
     }
     window.addEventListener('message', onMsg)
     return () => window.removeEventListener('message', onMsg)
   }, [])
 
-  const probe = useCallback(async (): Promise<boolean> => {
-    // 3 次重试兜底启动竞争 (proxy 在 whenReady 里异步起, 渲染页可能先切到本页)
-    for (let i = 0; i < PROBE_ATTEMPTS; i++) {
-      if (await window.api.pingMonitor()) return true
-      if (i < PROBE_ATTEMPTS - 1) await new Promise((r) => setTimeout(r, PROBE_INTERVAL_MS))
-    }
-    return false
-  }, [])
-
   useEffect(() => {
     let cancelled = false
     setProbing(true)
-    void probe().then((ok) => {
+    // 每次探测都**现取端口**（挂载一次 + 每次「重试」一次）：Tauri 的代理是异步起的，
+    // 端口可能挂载时为 0、之后才就绪，而 iframe 的 src 依赖这个值 —— 修复见 monitorProbe.ts。
+    // `port` 刻意不作为依赖：本 effect 会写 port，依赖它就成了自触发循环。
+    void probeMonitor(
+      () => api.getMonitorPort(),
+      () => api.pingMonitor(),
+      PROBE_ATTEMPTS,
+      PROBE_INTERVAL_MS,
+    ).then(({ port: p, ok }) => {
       if (cancelled) return
+      setPort(p)
       setProxyDown(!ok)
       setProbing(false)
     })
     return () => {
       cancelled = true
     }
-  }, [port, reloadKey, probe])
+  }, [reloadKey])
 
   const retry = (): void => {
     setReloadKey((k) => k + 1)

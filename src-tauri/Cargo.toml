@@ -1,0 +1,125 @@
+[package]
+name = "cc-session-analysis-tool"
+version = "0.1.4"
+edition = "2021"
+rust-version = "1.77"
+publish = false
+description = "Claude 会话耗时分析（Tauri v2 壳）"
+# 本包有**两个 bin**：`src/main.rs`（GUI，bin 名 = 包名）与 `src/bin/proxy-standalone.rs`
+# （契约测试用的独立代理进程）。tauri-cli 的 `tauri build` 会 `cargo build --bins`，
+# 然后在多个 bin 里挑「主二进制」；它认的是 `default-run`（或与包名同名者），
+# 两者都没有时就按目录遍历顺序挑 —— 实测挑中了 `proxy-standalone`，
+# 于是 **deb/rpm/AppImage 里装的是无界面的代理进程、`.desktop` 的 `Exec=proxy-standalone`，
+# GUI 二进制根本没进包**（Windows 的 NSIS 同理，构建日志打印
+# `Built application at: .../proxy-standalone.exe`）。
+# 因此这里必须显式声明 `default-run`（这也是 tauri-cli 报「找不到主二进制」时给出的官方修法）。
+# 注意：不能用 `tauri.conf.json` 的 `mainBinaryName` 代替 —— 那个只是**重命名**已选中的二进制，
+# 在多 bin 场景下会把选错的二进制重命名后覆盖掉真正的 GUI 二进制，更危险。
+default-run = "cc-session-analysis-tool"
+
+# Tauri v2 模板惯例：库名固定为 app_lib，避免与包名连字符/下划线转换纠缠。
+# crate-type 只留 rlib：模板默认附加 staticlib/cdylib 是为了给 iOS/Android 复用，
+# 而本项目只出 macOS/Windows/Linux 桌面包（bundle.targets 见 tauri.conf.json），
+# 桌面链全部经 rlib 取用（main.rs 调 app_lib::run、proxy-standalone、tests/）。
+# 实测 staticlib 单份 259 MB，且每次构建都要为它多做一次等量归档。
+[lib]
+name = "app_lib"
+crate-type = ["rlib"]
+
+# 契约测试专用的独立代理进程。**必须挂在非默认 feature 后面**：
+# `tauri build` 会把 cargo 报出来的**所有** bin 一起打进安装包，而这个 bin 与 GUI 无关，
+# 实测它会让 macOS `.app` 从 ~9.6 MB 涨到 ~15.8 MB（多出 6.87 MB 纯废重量）、dmg 从 ~4 MB 涨到 7.73 MB。
+# 挂上 `required-features` 后 tauri-cli 的 `get_binaries` 会把它放进 `disabled_bins` 直接忽略
+# （tauri 自己的单测就叫 `get_binaries_ignores_src_bin_with_disabled_required_features`）。
+# 契约测试照常可用：`cargo build --release --bin proxy-standalone --features standalone`。
+[[bin]]
+name = "proxy-standalone"
+path = "src/bin/proxy-standalone.rs"
+required-features = ["standalone"]
+
+[features]
+# 仅「契约测试要跑独立 proxy 进程」时需要打开；默认关闭，避免它进安装包。
+standalone = []
+
+# 菜单结构的断言必须跑在**主线程**：muda 的 macOS 后端只在主线程建菜单，而 `cargo test`
+# 的普通用例跑在派生线程上（实测 panic：`muda::Menu can only be created on the main thread`）。
+# `harness = false` 时由我们自己的 `main()` 执行，正好是进程主线程 —— 于是可以构造真实的
+# Tauri 菜单对象（MockRuntime）并断言层级/id/标签，而不是只测一份「菜单描述数据」。
+[[test]]
+name = "menu_structure"
+harness = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# `tray-icon`：托盘图标（2.4 壳层）。
+# `image-png`：托盘图标用 `Image::from_bytes(include_bytes!(...))` 从编译期嵌进的 PNG 解码；
+#   没有它 `Image::from_bytes` 根本不编译（见 tauri src/image/mod.rs 的 cfg）。
+tauri = { version = "2", features = ["protocol-asset", "tray-icon", "image-png"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# ── 内嵌 proxy（从 Stage 1 的 spike 提升而来，见 src/proxy/）──
+axum = "0.7"
+futures-util = "0.3"
+regex = "1"
+# 关键：default-features=false + rustls-tls + stream。默认特性会开启 gzip/brotli
+# 自动解压，reqwest 还会自动跟随跳转 —— 两者都会静默破坏字节保真（契约 C3/C6/C7）。
+# 跳转在代码里用 redirect(Policy::none()) 显式关掉。
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+tiktoken-rs = "0.6"
+url = "2"
+
+# tokio：fs/process/time 供 fs_ops 与 claude；net/sync/macros/rt-multi-thread 供 proxy
+tokio = { version = "1", features = ["fs", "io-util", "process", "time", "rt", "rt-multi-thread", "net", "sync", "macros"] }
+tauri-plugin-dialog = "2.0.0-rc.8"
+# 单实例：第二次启动不再新开进程，而是把参数交给已在跑的实例（见 lib.rs 的注册顺序）。
+tauri-plugin-single-instance = "2"
+
+# ── 悬浮窗需要 macOS 的透明窗口，而 Tauri 把它锁在 `macos-private-api` 后面 ──
+#
+# 实测（tauri-2.11.5 / tauri-runtime-wry-2.11.4）：不加这个特性时
+# `WebviewWindowBuilder::transparent()` **在 macOS 上根本不存在**
+# （`#[cfg(any(not(target_os = "macos"), feature = "macos-private-api"))]`），
+# 而走 `tauri.conf.json` 的 `transparent` 也会在运行期被忽略并打印一行 eprintln
+# （"The window is set to be transparent but the `macos-private-api` is not enabled"）。
+# 官方文档给出的开关是 `tauri > macOSPrivateApi`，但那条路要 CLI 去注入特性，
+# 而 `cargo test` / `cargo build` 不过 CLI —— 所以这里直接在清单里开，
+# 且**只对 macOS 目标**开：非 macOS 构建的特性集合与之前逐字节一致。
+#
+# 代价（必须知道）：`macos-private-api` 会用到 macOS 私有 API，
+# **上架 Mac App Store 会被拒**。本项目的分发目标是 dmg / nsis / deb（见方案 §8bis），
+# 不走 App Store，所以这是可接受的取舍。
+# 传递进来的 `wry/transparent` + `wry/fullscreen` 都是空特性，只在 wry 的 wkwebview 后端读。
+[target.'cfg(target_os = "macos")'.dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
+
+[dev-dependencies]
+# fs_ops 的单测需要 async 运行时（#[tokio::test]）；运行时本身不必进生产依赖
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+# `test` 特性提供 `tauri::test::mock_app()`（MockRuntime），让「应用菜单结构」这类
+# 平时只能靠人点的东西变成可自动化断言的对象（见 shell.rs 的单测）。
+# 官方文档就是这么加的：dev-dependencies 里再写一遍 tauri，该特性只在测试构建里生效。
+tauri = { version = "2", features = ["test"] }
+
+# 本 crate 保留行号级调试信息：仍能断点、堆栈仍带行号，只丢变量/类型等大块 DWARF。
+# 实测自己的 rlib 由 138 MB 降到约 30-40 MB。
+# incremental 关闭：它是「用磁盘换重编速度」的缓存，会随每次构建持续累积、没有上限
+# （实测已从 146 MB 涨到 365 MB）；而本 crate 的增量重编本来就在 8s 内，不值得无限占盘。
+[profile.dev]
+incremental = false
+debug = "line-tables-only"
+
+# 依赖层更彻底 —— 完全不带 debuginfo：它们的调试价值最低，却占了 dev 编译时间与体积的
+# 绝大部分（tauri 单份 rlib 50 MB → 10 MB）。`"*"` 只匹配依赖、不含本 package；
+# test profile 继承 dev，`cargo test` 同样受益。
+[profile.dev.package."*"]
+debug = false
+
+# 与 Electron 版同样追求体积：strip + LTO + opt-level=s
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

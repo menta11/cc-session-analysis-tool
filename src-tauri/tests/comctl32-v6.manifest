@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  给**测试二进制**用的 Windows 应用清单。
+
+  为什么需要它：`muda`（Tauri 菜单的底层库）的 Windows 后端静态导入
+  `comctl32.dll!TaskDialogIndirect`，而该符号**只由 comctl32 v6 导出** —— v6 要靠 Side-by-Side
+  激活上下文加载（也就是可执行文件里得嵌这份声明）。没有清单时 `LoadLibrary("comctl32.dll")`
+  落到 System32 里的 v5.82，进程加载即失败：
+
+      menu_structure-*.exe (exit code: 0xc0000139, STATUS_ENTRYPOINT_NOT_FOUND)
+
+  应用二进制不受影响：`tauri-build` 已经给它嵌了清单（`grep -c Microsoft.Windows.Common-Controls
+  src-tauri/target/debug/cc-session-analysis-tool.exe` -> 1）。缺的只有 cargo 构建的集成测试
+  二进制，它们不经过 tauri-build。装配见 `src-tauri/build.rs`。
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*"
+      />
+    </dependentAssembly>
+  </dependency>
+</assembly>
